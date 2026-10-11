@@ -2,13 +2,13 @@
 import { nextTick, ref, watch } from 'vue'
 
 // Electron 不实现 window.prompt，站内搜索（网址里的 {q}）用这个对话框取关键词。
-const props = defineProps({
-  visible: Boolean,
-  title: { type: String, default: '' },
-})
+const props = withDefaults(defineProps<{
+  visible?: boolean
+  title?: string
+}>(), { visible: false, title: '' })
 const emit = defineEmits(['submit', 'cancel'])
-const dialog = ref(null)
-const field = ref(null)
+const dialog = ref<HTMLDialogElement | null>(null)
+const field = ref<HTMLInputElement | null>(null)
 const value = ref('')
 
 watch(() => props.visible, async visible => {
@@ -17,7 +17,7 @@ watch(() => props.visible, async visible => {
     return
   }
   value.value = ''
-  if (!dialog.value.open) dialog.value.showModal()
+  if (!dialog.value?.open) dialog.value?.showModal()
   await nextTick()
   field.value?.focus()
 })

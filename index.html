@@ -4,11 +4,22 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light dark" />
+    <!--
+      笔记正文的净化（src/lib/sanitize.ts）是第一道防线，这里是第二道：
+      script-src 不含 'unsafe-inline'，所以万一有 on* 属性漏过过滤也不会被执行；
+      img-src 不含 http(s)，笔记里的外部图片拉不动，用户 IP 不会泄露给第三方。
+      插件自己的网络请求都走 preload 的 Node 侧，不受页面 CSP 约束，所以 connect-src 可以只留 'self'（开发期的 HMR websocket 同源，CSP3 的 'self' 覆盖）。
+      列上 file: 是因为插件页面可能以 file:// 载入，那时 'self' 是不透明来源、匹配不到本地脚本。
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self' file:; script-src 'self' file:; style-src 'self' file: 'unsafe-inline'; img-src 'self' file: data:; font-src 'self' file: data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'"
+    />
     <link rel="icon" href="./utools/logo.png" />
     <title>FunLink</title>
   </head>
   <body>
     <div id="app"></div>
-    <script type="module" src="/src/main.js"></script>
+    <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

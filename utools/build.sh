@@ -11,6 +11,10 @@ command -v pnpm >/dev/null || { echo "error: pnpm is required (corepack enable)"
 echo "=== install dependencies ==="
 pnpm install --frozen-lockfile
 
+echo "=== check source ==="
+pnpm lint
+pnpm typecheck
+
 echo "=== test source ==="
 pnpm test
 node --check "$PLUGIN_DIR/preload.js"

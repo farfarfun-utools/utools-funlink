@@ -1,11 +1,13 @@
 <script setup lang="ts">
-defineProps({
-  roots: { type: Array, required: true },
-  currentView: { type: String, required: true },
-  activeRootId: { type: String, required: true },
-  theme: { type: String, required: true },
-  rounded: { type: Number, default: 36 },
-})
+import type { Category } from '../lib/types'
+
+withDefaults(defineProps<{
+  roots: Category[]
+  currentView: string
+  activeRootId: string
+  theme: string
+  rounded?: number
+}>(), { rounded: 36 })
 const emit = defineEmits(['select', 'manage', 'cycle-theme', 'settings'])
 </script>
 

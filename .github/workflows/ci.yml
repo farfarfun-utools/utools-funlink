@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  # 允许手动触发，方便在改 CI 本身时验证。
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # 同一分支的新提交会取消上一次还在跑的流水线。
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 20 是 package.json engines 要求的下限，也是 uTools 8 内置的 Node 版本；
+        # 22 用来提前发现新版本上的问题。
+        node: [20, 22]
+    steps:
+      - uses: actions/checkout@v4
+
+      # 必须排在 setup-node 之前：cache: pnpm 需要 pnpm 已经可用。
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
+
+      # preload.js 跑在 uTools 的 Node 环境里，不经过 Vite，所以单独做语法检查；
+      # plugin.json 写坏了插件直接装不上，这里也过一遍解析。
+      - name: Verify plugin package
+        run: |
+          node --check utools/preload.js
+          node -e "JSON.parse(require('fs').readFileSync('utools/plugin.json', 'utf8'))"
+          test -f utools/dist/index.html
+          test -f utools/logo.png
+          test -f utools/search.png
+
+      - name: Upload plugin artifact
+        if: matrix.node == 20
+        uses: actions/upload-artifact@v4
+        with:
+          name: utools-funlink-plugin
+          path: utools/
+          if-no-files-found: error

@@ -1,9 +1,11 @@
 <script setup lang="ts">
-defineProps({
-  categories: { type: Array, required: true },
-  activeCategoryId: { type: String, required: true },
-  position: { type: String, default: 'top' },
-})
+import type { Category } from '../lib/types'
+
+withDefaults(defineProps<{
+  categories: Category[]
+  activeCategoryId: string
+  position?: Category['tabPosition']
+}>(), { position: 'top' })
 const emit = defineEmits(['select'])
 </script>
 

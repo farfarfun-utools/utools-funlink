@@ -5,10 +5,16 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "noEmit": true,
-    "noImplicitAny": true,
     "skipLibCheck": true,
-    "strict": false,
+    "strict": true,
+    // 下标访问一律带上 undefined。数组取第一项、取模取颜色这类写法很容易越界，
+    // 开了这个才能在编译期看出来，而不是运行时拿到 undefined 再往下传。
+    "noUncheckedIndexedAccess": true,
     "target": "ES2022",
+    // uTools 官方类型定义，声明全局 utools 与 window.utools。
+    // 装上之后 API 改名（如 setExpendHeight → setExpandHeight）会在编译期报错，
+    // 而不是靠可选调用在运行时静默失效。
+    "types": ["utools-api-types"],
     "useDefineForClassFields": true
   },
   "include": ["src/**/*.ts", "src/**/*.vue", "vite.config.ts"]

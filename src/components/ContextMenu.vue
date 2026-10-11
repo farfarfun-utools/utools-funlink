@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { nextTick, ref, watch } from 'vue'
+import type { MenuItem } from '../lib/types'
 
-const props = defineProps({ items: { type: Array, required: true }, x: { type: Number, required: true }, y: { type: Number, required: true } })
+const props = defineProps<{ items: MenuItem[]; x: number; y: number }>()
 const emit = defineEmits(['select'])
-const menu = ref(null)
+const menu = ref<HTMLElement | null>(null)
 const position = ref({ left: `${props.x}px`, top: `${props.y}px` })
 
 watch(() => [props.x, props.y, props.items], async () => {

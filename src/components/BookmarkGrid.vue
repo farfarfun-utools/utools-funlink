@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import BookmarkCard from './BookmarkCard.vue'
+import type { Bookmark } from '../lib/types'
 
-defineProps({
-  bookmarks: { type: Array, required: true },
-  trashView: Boolean,
-  showAdd: Boolean,
-})
+defineProps<{
+  bookmarks: Bookmark[]
+  trashView?: boolean
+  showAdd?: boolean
+}>()
 const emit = defineEmits(['add', 'open', 'note', 'context-menu', 'drag-start', 'drop'])
 </script>
 

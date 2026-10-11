@@ -33,6 +33,10 @@ function normalizeBrowser(value: unknown): Bookmark['browser'] {
   return typeof value === 'string' && KNOWN_BROWSERS.has(value) ? value as Bookmark['browser'] : 'default'
 }
 
+// 「网址精灵」导出的是外部插件的任意 JSON，字段既不保证存在也不保证类型，
+// 这个文件的职责就是把它收窄成本项目的类型。换成 unknown 只会让下面
+// 每次取字段都要写一遍断言，读起来更差，所以这里保留 any。
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type LegacyDoc = Record<string, any>
 
 function orderedCategories(categories: Category[], sortDoc: LegacyDoc | null): Category[] {
@@ -81,21 +85,25 @@ export function convertLegacyExport(raw: unknown): { state: AppState, dropped: n
 
   const notes = new Map<string, unknown>()
   const sortLists = new Map<string, unknown>()
-  let sortCategoryDoc: LegacyDoc | null = null
-  let settingDoc: LegacyDoc | null = null
+  // 这两份文档各自最多一条，但用数组收集而不是 let + null：赋值发生在下面的 forEach
+  // 回调里，TS 的控制流分析不跟踪回调内的写入，会把 let 变量一路收窄成 null，
+  // 读 settingDoc?.value 时就变成了 never。
+  const sortCategoryDocs: LegacyDoc[] = []
+  const settingDocs: LegacyDoc[] = []
   const categoryDocs: LegacyDoc[] = []
   const bookmarkDocs: LegacyDoc[] = []
 
   docs.forEach(doc => {
     if (!doc || typeof doc !== 'object') return
     const id = typeof doc._id === 'string' ? doc._id : ''
-    if (id === 'setting') settingDoc = doc
-    else if (id === 'sort_cat@category') sortCategoryDoc = doc
+    if (id === 'setting') settingDocs.push(doc)
+    else if (id === 'sort_cat@category') sortCategoryDocs.push(doc)
     else if (id.startsWith('sort_web@')) sortLists.set(id.slice(9), doc.value)
     else if (doc.content != null && id.startsWith('note_')) notes.set(id.replace(/^note_/, 'web_'), doc.content)
     else if (doc.label != null && !SPECIAL_CATEGORY_IDS.has(id)) categoryDocs.push(doc)
     else if (doc.title && doc.url) bookmarkDocs.push(doc)
   })
+  const settingDoc = settingDocs[0]
 
   const categories = orderedCategories(
     categoryDocs.map((doc): Category => ({
@@ -104,7 +112,7 @@ export function convertLegacyExport(raw: unknown): { state: AppState, dropped: n
       parentId: SPECIAL_CATEGORY_IDS.has(doc.pid) ? '' : doc.pid || '',
       tabPosition: doc.tabPosition || 'top',
     })),
-    sortCategoryDoc,
+    sortCategoryDocs[0] || null,
   )
 
   const categoryIds = new Set(categories.map(category => category.id))

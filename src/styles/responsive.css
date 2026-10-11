@@ -1,0 +1,26 @@
+/* 动画关键帧与响应式断点。放在最后，断点里的覆盖要赢过前面的规则。 */
+@keyframes preview-ripple {
+  0% { border: 5px solid var(--primary); opacity: .25; }
+  100% { border: 0; opacity: 0; transform: scale(1.5); }
+}
+
+@media (min-width: 1024px) {
+  .bookmark-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+@media (max-width: 620px) {
+  .top-nav { padding-right: 20px; padding-left: 20px; overflow-x: auto; }
+  .top-nav > button:not(.round-button) { padding: 0 14px; }
+  .main-view { padding: 12px; }
+  .bookmark-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .category-modal { width: calc(100vw - 32px) !important; }
+}
+
+@media (max-height: 620px) {
+  .category-options-popover { top: auto; bottom: 48px; }
+  .category-options-popover::before { top: auto; bottom: -5px; transform: rotate(225deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; }
+}

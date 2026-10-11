@@ -1,0 +1,111 @@
+/* 顶部导航与二级导航（上/下/左/右四种摆放）。 */
+.header { position: relative; z-index: 10; width: 100%; height: 50px; }
+.top-nav {
+  width: 100%;
+  height: 50px;
+  display: flex;
+  align-items: center;
+  padding: 2px var(--nav-padding) 0;
+  border-radius: 0 0 36px 36px;
+  background: var(--nav-bg);
+}
+.top-nav > button:not(.round-button) {
+  position: relative;
+  height: 48px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 20px;
+  color: var(--text-strong);
+  font-size: 14px;
+  line-height: 46px;
+  white-space: nowrap;
+}
+.top-nav > button:not(.round-button)::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  background: transparent;
+}
+.top-nav > button.active { color: var(--primary); }
+.top-nav > button.active::after { background: var(--primary); }
+.top-nav > button:not(.round-button) > span, .top-nav .fly-button > i { position: relative; top: -1px; }
+.top-nav .fly-button { width: 58px; padding: 0; font-size: 18px; }
+.top-nav .fly-button .iconfont { font-size: 18px; }
+.nav-spacer { min-width: 12px; flex: 1 1 auto; }
+.round-button {
+  width: 26px;
+  height: 26px;
+  flex: 0 0 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--text);
+  font-size: 12px;
+  transform: translateY(-.5px);
+}
+.round-button:hover { color: var(--primary); }
+.round-button .iconfont { font-size: 16px; }
+.round-button.theme-button { margin-right: 16px; }
+.round-button.theme-button .iconfont { font-size: 18px; padding-top: 1px; }
+.round-button.theme-button .iconfont { transform: translateY(-1px); }
+
+.main { height: calc(100vh - 60px); overflow: auto; }
+.main-view { min-height: 100%; padding: 16px; }
+.detail-content { width: 100%; }
+.detail-content.tabs-left, .detail-content.tabs-right { display: flex; align-items: flex-start; gap: 10px; }
+.detail-content.tabs-right .secondary-nav { order: 2; }
+.detail-content.tabs-top, .detail-content.tabs-bottom { display: flex; flex-direction: column; gap: 10px; }
+.detail-content.tabs-bottom .secondary-nav { order: 2; }
+.special-view-header { height: 36px; display: flex; align-items: center; margin-bottom: 15px; }
+.special-view-title { height: 36px; display: flex; align-items: center; padding: 6px 16px; border-radius: 20px; background: var(--surface); box-shadow: 0 1px 2px rgb(0 0 0 / 5%); color: var(--text); font-size: 16px; line-height: 24px; }
+.special-view-title .iconfont { margin-right: 9px; color: var(--primary); font-size: 18px; }
+.special-view-title.danger .iconfont { color: var(--danger); }
+.special-view-header > button { width: 16px; height: 24px; display: grid; place-items: center; margin-left: auto; color: var(--muted); }
+.special-view-header > button .iconfont { font-size: 14px; }
+
+.secondary-nav { position: relative; flex: 0 0 auto; }
+.secondary-nav.is-left, .secondary-nav.is-right { width: 72px; }
+.secondary-nav.is-left::after, .secondary-nav.is-right::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--border);
+}
+.secondary-nav.is-left::after { right: 4px; }
+.secondary-nav.is-right::after { left: 4px; }
+.secondary-nav button {
+  position: relative;
+  z-index: 1;
+  display: block;
+  height: 40px;
+  color: var(--text-strong);
+  font-size: 14px;
+  line-height: 40px;
+  white-space: nowrap;
+}
+.secondary-nav.is-left button, .secondary-nav.is-right button { width: 68px; text-align: center; }
+.secondary-nav.is-right button { margin-left: 4px; }
+.secondary-nav button.active { color: var(--primary); }
+.secondary-nav.is-left button.active::after, .secondary-nav.is-right button.active::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 2;
+  width: 2px;
+  background: var(--primary);
+}
+.secondary-nav.is-left button.active::after { right: 0; }
+.secondary-nav.is-right button.active::after { left: 0; }
+.secondary-nav.is-top, .secondary-nav.is-bottom { display: flex; height: 40px; }
+.secondary-nav.is-top::after, .secondary-nav.is-bottom::after { content: ''; position: absolute; right: 0; bottom: 0; left: 0; height: 2px; background: var(--border); }
+.secondary-nav.is-top button, .secondary-nav.is-bottom button { min-width: 68px; padding: 0 20px; }
+.secondary-nav.is-top button.active::after, .secondary-nav.is-bottom button.active::after { content: ''; position: absolute; right: 0; bottom: 0; left: 0; height: 2px; background: var(--primary); }
+

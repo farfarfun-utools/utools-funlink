@@ -1,0 +1,126 @@
+/* 设计令牌：浅色/深色两套变量。data-theme 为 system 时跟随 prefers-color-scheme。 */
+:root {
+  color-scheme: light;
+  --primary: #4fc9da;
+  --primary-soft: #edfafb;
+  --bg: #f4f4f4;
+  --surface: #fff;
+  --text: #45505a;
+  --text-strong: #3e4a58;
+  --muted: #9ca3af;
+  --placeholder: #a9aec0;
+  --border: #e8ebef;
+  --danger: #f06445;
+  --danger-soft: #fef0ec;
+  --success: #00c1a2;
+  --success-soft: #e6f9f6;
+  --fill: #f0f2f5;
+  --fill-light: #f5f7fa;
+  --fill-lighter: #fafafa;
+  --control-bg: #fff;
+  --control-border: #e8ebef;
+  --nav-bg: #f4f4f4;
+  --nav-padding: 40px;
+  --card-bg: #fff;
+  --add-color: #c8c9cc;
+  --add-opacity: 1;
+  --dialog-shadow: 0 12px 32px 4px rgb(0 0 0 / 4%), 0 8px 20px rgb(0 0 0 / 8%);
+  --drawer-shadow: 0 16px 48px 16px rgb(0 0 0 / 8%), 0 12px 32px rgb(0 0 0 / 12%), 0 8px 16px -8px rgb(0 0 0 / 16%);
+  --float-shadow: 0 6px 24px rgb(140 152 164 / 13%);
+  --menu-border: #fff;
+  --note-bg: #fff;
+  --mark-bg: #fce0da;
+  --switch-off: #e8ebef;
+  --kbd-bg: #fff;
+  --kbd-border: #e5e7eb;
+  --kbd-color: #6b7280;
+  --disabled-check-bg: #f1f5f9;
+  --disabled-check-border: #d8e2ef;
+  --disabled-check-color: #a9b9ce;
+  --empty-light-display: block;
+  --empty-dark-display: none;
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #232528;
+  --surface: #2e3033;
+  --text: #d1d6df;
+  --text-strong: #e6ebf4;
+  --muted: #a8acb4;
+  --placeholder: #94979e;
+  --border: #383a3e;
+  --primary-soft: #27353a;
+  --danger-soft: #382b2b;
+  --success-soft: #203534;
+  --fill: #3d3f42;
+  --fill-light: #343639;
+  --fill-lighter: #2c2e31;
+  --control-bg: #2c2e31;
+  --control-border: #434548;
+  --nav-bg: #303133;
+  --nav-padding: 20px;
+  --card-bg: rgb(255 255 255 / 5%);
+  --add-color: #5a5c61;
+  --add-opacity: .3;
+  --dialog-shadow: 0 12px 32px 4px rgb(0 0 0 / 36%), 0 8px 20px rgb(0 0 0 / 72%);
+  --drawer-shadow: 0 16px 48px 16px rgb(0 0 0 / 72%), 0 12px 32px #000, 0 8px 16px -8px #000;
+  --float-shadow: 0 0 6px rgb(0 0 0 / 12%);
+  --menu-border: #383a3e;
+  --note-bg: #303133;
+  --mark-bg: #4c322e;
+  --switch-off: #434548;
+  --kbd-bg: rgb(0 0 0 / 30%);
+  --kbd-border: rgb(255 255 255 / 15%);
+  --kbd-color: rgb(255 255 255 / 80%);
+  --disabled-check-bg: #343639;
+  --disabled-check-border: #4b4d51;
+  --disabled-check-color: #74777d;
+  --empty-light-display: none;
+  --empty-dark-display: block;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root[data-theme='system'] {
+    color-scheme: dark;
+    --bg: #232528;
+    --surface: #2e3033;
+    --text: #d1d6df;
+    --text-strong: #e6ebf4;
+    --muted: #a8acb4;
+    --placeholder: #94979e;
+    --border: #383a3e;
+    --primary-soft: #27353a;
+    --danger-soft: #382b2b;
+    --success-soft: #203534;
+    --fill: #3d3f42;
+    --fill-light: #343639;
+    --fill-lighter: #2c2e31;
+    --control-bg: #2c2e31;
+    --control-border: #434548;
+    --nav-bg: #303133;
+    --nav-padding: 20px;
+    --card-bg: rgb(255 255 255 / 5%);
+    --add-color: #5a5c61;
+    --add-opacity: .3;
+    --dialog-shadow: 0 12px 32px 4px rgb(0 0 0 / 36%), 0 8px 20px rgb(0 0 0 / 72%);
+    --drawer-shadow: 0 16px 48px 16px rgb(0 0 0 / 72%), 0 12px 32px #000, 0 8px 16px -8px #000;
+    --float-shadow: 0 0 6px rgb(0 0 0 / 12%);
+    --menu-border: #383a3e;
+    --note-bg: #303133;
+    --mark-bg: #4c322e;
+    --switch-off: #434548;
+    --kbd-bg: rgb(0 0 0 / 30%);
+    --kbd-border: rgb(255 255 255 / 15%);
+    --kbd-color: rgb(255 255 255 / 80%);
+    --disabled-check-bg: #343639;
+    --disabled-check-border: #4b4d51;
+    --disabled-check-color: #74777d;
+    --empty-light-display: none;
+    --empty-dark-display: block;
+  }
+}
+

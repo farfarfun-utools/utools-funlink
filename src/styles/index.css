@@ -1,0 +1,17 @@
+/*
+  全局样式入口。原先是根目录下一个 785 行的 style.css，没有任何分节，
+  改一处要先在整文件里找；这里按界面区域拆开，内容和顺序都没有变动。
+
+  导入顺序就是层叠顺序，不要随意调整：令牌和重置必须排在组件样式前面，
+  断点覆盖必须排在最后。
+*/
+@import './fonts.css';
+@import './theme.css';
+@import './base.css';
+@import './navigation.css';
+@import './cards.css';
+@import './overlay.css';
+@import './forms.css';
+@import './dialogs.css';
+@import './settings.css';
+@import './responsive.css';

@@ -1,46 +1,69 @@
 <script setup lang="ts">
 import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { initials, normalizeUrl } from '../lib/core'
-import { safeColor } from '../composables/useFunLink'
+import { toIconDataUrl } from '../lib/image'
+import { safeColor } from '../lib/core'
+import type { BrowserMode, Bookmark, Category } from '../lib/types'
+
+/** 表单的字段都是必填的：空值用 '' / [] 表示，这样模板里不用到处判 undefined。 */
+interface BookmarkForm {
+  id: string
+  url: string
+  urls: string[]
+  title: string
+  description: string
+  categoryId: string
+  categoryIds: string[]
+  iconType: 'text' | 'image'
+  icon: string
+  color: string
+  iconData: string
+  iconSize: number
+  browser: BrowserMode
+  favorite: boolean
+  quick: boolean
+}
 
 const COLORS = ['#8480f9', '#2792ff', '#1fd88b', '#fdcd05', '#ff7ba2', '#98d517', '#ff7f1b', '#07b882']
-// 图标以 data URL 存进 dbStorage，限制体积避免把本地库撑大。
+// 图标以 data URL 存进 dbStorage。选图时会按显示尺寸压缩，这里卡的是解码前的原图体积。
 const MAX_ICON_BYTES = 200 * 1024
-const props = defineProps({
-  categories: { type: Array, required: true },
-  defaultCategoryId: { type: String, required: true },
-  bookmarkCount: { type: Number, required: true },
-})
+const props = defineProps<{
+  categories: Category[]
+  defaultCategoryId: string
+  bookmarkCount: number
+}>()
 const emit = defineEmits(['save'])
-const dialog = ref(null)
-const urlInput = ref(null)
-const iconInput = ref(null)
-const afterId = ref(null)
+const dialog = ref<HTMLDialogElement | null>(null)
+const urlInput = ref<HTMLInputElement | null>(null)
+const iconInput = ref<HTMLInputElement | null>(null)
+const afterId = ref<string | null>(null)
 const editing = ref(false)
 const expanded = ref(false)
 const categoryOpen = ref(false)
 const activeCategoryRootId = ref('')
 const error = ref('')
-const form = reactive({})
+const form = reactive<BookmarkForm>(blankForm())
 const roots = computed(() => props.categories.filter(category => !category.parentId))
-const childrenOf = id => props.categories.filter(category => category.parentId === id)
-const categoryRoots = computed(() => [...roots.value, { id: 'cat@default', name: '收集箱', parentId: '' }])
+const childrenOf = (id: string) => props.categories.filter(category => category.parentId === id)
+// 「收集箱」不是真实分类，但在选择器里要能被勾上，所以拼成一个同形状的伪分类。
+const categoryRoots = computed<Category[]>(() => [...roots.value, { id: 'cat@default', name: '收集箱', parentId: '' }])
 const activeCategoryChildren = computed(() => childrenOf(activeCategoryRootId.value))
-const selectedCategories = computed(() => (form.categoryIds || []).flatMap(id => {
+const selectedCategories = computed<{ id: string, name: string }[]>(() => form.categoryIds.flatMap(id => {
   if (id === 'cat@default') return [{ id, name: '收集箱' }]
   const category = props.categories.find(item => item.id === id)
   return category ? [category] : []
 }))
 
-function blankForm() {
+function blankForm(): BookmarkForm {
   return {
     id: '', url: '', urls: [], title: '', description: '', categoryId: props.defaultCategoryId || 'cat@default', categoryIds: [props.defaultCategoryId || 'cat@default'],
-    iconType: 'text', icon: '', color: COLORS[props.bookmarkCount % COLORS.length], iconData: '', iconSize: 16,
+    iconType: 'text', icon: '', color: safeColor(COLORS[props.bookmarkCount % COLORS.length]), iconData: '', iconSize: 16,
     browser: 'default', favorite: false, quick: false,
   }
 }
 
-function open(bookmark = null, insertAfterId = null) {
+// 从主搜索框进来时只带着一个 url（见 useFunLink 的 setupUtools），所以收 Partial。
+function open(bookmark: Partial<Bookmark> | null = null, insertAfterId: string | null = null) {
   editing.value = Boolean(bookmark?.id)
   afterId.value = insertAfterId
   error.value = ''
@@ -49,14 +72,18 @@ function open(bookmark = null, insertAfterId = null) {
     ? bookmark.categoryIds.slice()
     : [bookmark?.categoryId || props.defaultCategoryId || 'cat@default']
   form.categoryIds = [...new Set(categoryIds)]
-  form.categoryId = form.categoryIds[0]
+  form.categoryId = form.categoryIds[0] ?? ''
   const selectedCategory = props.categories.find(category => category.id === form.categoryIds[0])
   activeCategoryRootId.value = selectedCategory?.parentId || selectedCategory?.id || roots.value[0]?.id || 'cat@default'
   categoryOpen.value = false
-  form.urls = Array.isArray(bookmark?.urls) ? bookmark.urls.map(item => typeof item === 'string' ? item : item.value) : []
+  // 「网址精灵」旧备份里附加网址是 { value } 对象而不是字符串，这里统一拍平。
+  const rawUrls: unknown = bookmark?.urls
+  form.urls = Array.isArray(rawUrls)
+    ? rawUrls.map(item => typeof item === 'string' ? item : String((item as { value?: unknown })?.value ?? ''))
+    : []
   form.color = safeColor(form.color)
   expanded.value = editing.value || /^(https?|ftp|file):\/\//i.test(form.url)
-  if (!dialog.value.open) dialog.value.showModal()
+  if (!dialog.value?.open) dialog.value?.showModal()
 }
 
 function close() {
@@ -70,22 +97,23 @@ function pickIcon() {
   iconInput.value?.click()
 }
 
-function readIcon(event) {
-  const file = event.target.files?.[0]
-  event.target.value = ''
+async function readIcon(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  // 先清空 input，同一张图片再选一次也能触发 change。
+  input.value = ''
   if (!file) return
   if (file.size > MAX_ICON_BYTES) {
     error.value = `图标图片不能超过 ${MAX_ICON_BYTES / 1024}KB`
     return
   }
-  const reader = new FileReader()
-  reader.onload = () => {
-    form.iconData = String(reader.result || '')
+  try {
+    form.iconData = await toIconDataUrl(file)
     form.iconType = 'image'
     error.value = ''
+  } catch {
+    error.value = '图片读取失败'
   }
-  reader.onerror = () => { error.value = '图片读取失败' }
-  reader.readAsDataURL(file)
 }
 
 function useImageIcon() {
@@ -101,7 +129,7 @@ function clearIcon() {
 function submit() {
   try {
     if (!form.title.trim()) throw new Error('网站名称不能为空')
-    if (!form.categoryIds?.length) throw new Error('请选择分类')
+    if (!form.categoryIds.length) throw new Error('请选择分类')
     if (form.iconType === 'image' && !form.iconData) throw new Error('请选择图标图片，或改用文字图标')
     emit('save', {
       id: form.id,
@@ -123,14 +151,14 @@ function submit() {
     }, afterId.value)
     close()
   } catch (caught) {
-    error.value = caught.message
+    error.value = caught instanceof Error ? caught.message : '保存失败'
     nextTick(() => urlInput.value?.focus())
   }
 }
 
-function closeOnBackdrop(event) { if (event.target === dialog.value) close() }
+function closeOnBackdrop(event: MouseEvent) { if (event.target === dialog.value) close() }
 
-function cancel(event) {
+function cancel(event: Event) {
   if (!categoryOpen.value) return close()
   event.preventDefault()
   categoryOpen.value = false
@@ -141,23 +169,23 @@ function openCategoryMenu() {
   error.value = ''
 }
 
-function categoryIdsForRoot(root) {
+function categoryIdsForRoot(root: Category) {
   const children = childrenOf(root.id)
   return children.length ? children.map(category => category.id) : [root.id]
 }
 
-function rootChecked(root) {
+function rootChecked(root: Category) {
   const ids = categoryIdsForRoot(root)
   return ids.every(id => form.categoryIds.includes(id)) || form.categoryIds.includes(root.id)
 }
 
-function rootIndeterminate(root) {
+function rootIndeterminate(root: Category) {
   const ids = categoryIdsForRoot(root)
   const count = ids.filter(id => form.categoryIds.includes(id)).length
   return count > 0 && count < ids.length
 }
 
-function toggleCategory(id) {
+function toggleCategory(id: string) {
   form.categoryIds = form.categoryIds.includes(id)
     ? form.categoryIds.filter(categoryId => categoryId !== id)
     : [...form.categoryIds, id]
@@ -165,9 +193,10 @@ function toggleCategory(id) {
   error.value = ''
 }
 
-function toggleRoot(root) {
+function toggleRoot(root: Category) {
   const ids = categoryIdsForRoot(root)
-  if (ids.length === 1) return toggleCategory(ids[0])
+  // 一级分类没有子分类时，勾它就等于勾自己这一个 id。
+  if (ids.length === 1 && ids[0]) return toggleCategory(ids[0])
   const remove = rootChecked(root)
   form.categoryIds = remove
     ? form.categoryIds.filter(id => id !== root.id && !ids.includes(id))

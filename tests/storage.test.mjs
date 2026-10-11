@@ -1,6 +1,6 @@
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { readStorage, writeStorage } from '../src/lib/storage.ts'
+import { commitStorage, readStorage, serializeForStorage, writeStorage } from '../src/lib/storage.ts'
 
 function fakeLocalStorage(initial = {}) {
   const map = new Map(Object.entries(initial))
@@ -66,6 +66,64 @@ test('legacy localStorage values move into dbStorage once', () => {
 test('corrupt localStorage json returns the fallback instead of throwing', () => {
   withEnv({ local: fakeLocalStorage({ broken: '{not json' }) }, () => {
     assert.deepEqual(readStorage('broken', { safe: true }), { safe: true })
+  })
+})
+
+// 整库收藏压在一个 dbStorage 文档里，而 uTools 单个文档上限 1MB。
+// 超限时必须让调用方知道，不能写了个 undefined 回去就当成功了。
+test('writeStorage 超出单文档上限时返回失败，并且不写坏已有数据', () => {
+  const db = fakeDb({ 'funlink-state-v1': { bookmarks: ['旧数据'] } })
+  withEnv({ db }, () => {
+    // 1MB 以上的 data URL 图标，等价于几张没压缩的图片图标。
+    const huge = { bookmarks: [{ iconData: `data:image/png;base64,${'A'.repeat(1024 * 1024)}` }] }
+    const result = writeStorage('funlink-state-v1', huge)
+    assert.equal(result.ok, false)
+    assert.ok(result.bytes > 1024 * 1024, '应该报出真实体积')
+    assert.ok(result.message.includes('1MB'), '提示里要讲清是撞上了 1MB 上限')
+    assert.deepEqual(db.get('funlink-state-v1'), { bookmarks: ['旧数据'] }, '写不下就该原样保留，不能把库清空')
+  })
+})
+
+test('writeStorage 按字节而不是字符数判断体积', () => {
+  const db = fakeDb()
+  withEnv({ db }, () => {
+    // 中文一个字 3 字节：40 万个汉字按 length 算才 40 万「字符」，看着没超，
+    // 实际已经 120 万字节。按 length 估会把超限的数据放过去。
+    const result = writeStorage('funlink-state-v1', { note: '书'.repeat(400000) })
+    assert.equal(result.ok, false)
+    assert.ok(result.bytes > 1024 * 1024)
+  })
+})
+
+test('writeStorage 在 setItem 抛错时返回失败而不是把异常扔给调用方', () => {
+  const db = fakeDb()
+  db.setItem = () => { throw new Error('db is locked') }
+  withEnv({ db }, () => {
+    const result = writeStorage('funlink-state-v1', { a: 1 })
+    assert.equal(result.ok, false)
+    assert.ok(result.message.includes('db is locked'), '底层原因要带出来，方便用户反馈问题')
+  })
+})
+
+test('writeStorage 写成功时返回体积，调用方可以据此提示用量', () => {
+  withEnv({ db: fakeDb() }, () => {
+    const result = writeStorage('funlink-state-v1', { a: 1 })
+    assert.equal(result.ok, true)
+    assert.equal(result.bytes, JSON.stringify({ a: 1 }).length)
+  })
+})
+
+// 序列化和落盘分成两步，调用方才能拿 json 跟上次写的比一比，一样就不用再写。
+test('serializeForStorage 和 commitStorage 可以分开用', () => {
+  const db = fakeDb()
+  withEnv({ db }, () => {
+    const snapshot = serializeForStorage({ note: '书' })
+    assert.equal(snapshot.json, '{"note":"书"}')
+    // json 有 12 个字符，其中「书」占 3 字节，所以是 14 而不是 12。
+    assert.equal(snapshot.bytes, 14, '体积要按 UTF-8 字节算')
+
+    assert.equal(commitStorage('funlink-demo', snapshot).ok, true)
+    assert.deepEqual(db.get('funlink-demo'), { note: '书' })
   })
 })
 

@@ -1,39 +1,78 @@
 <script setup lang="ts">
+// 本对话框直接改 settings 这个 prop：父组件传进来的就是它自己的响应式设置对象，
+// 共享引用是有意的——设置项（如搜索范围、窗口尺寸）要即时生效，
+// 落盘则由 save-settings 事件交回父组件统一处理。
+// 改成本地草稿再回传会把「即时生效」变成「保存后生效」，那是行为变更，不在本次改动范围内。
+/* eslint-disable vue/no-mutating-props */
 import { computed, reactive, ref } from 'vue'
 import emptyImage from '../assets/empty.svg'
 import emptyDarkImage from '../assets/empty-dark.svg'
+import { decryptSecret, encryptSecret } from '../lib/secret'
 import { readStorage, writeStorage } from '../lib/storage'
+import type { AppState, Bookmark, Settings } from '../lib/types'
 
-const props = defineProps({
-  settings: { type: Object, required: true },
-  bookmarks: { type: Array, default: () => [] },
-  backupData: { type: Object, default: null },
-})
+/** WebDav 目录列表里的一个备份文件。 */
+interface WebDavFile {
+  href: string
+  name: string
+  size: number
+  modified: string
+}
+
+/** 存储里的 WebDav 配置。secret 是加密后的密码；password 是 1.x 的明文字段，只用于迁移。 */
+interface StoredWebdav {
+  host?: string
+  username?: string
+  secret?: string
+  password?: string
+}
+
+/** 失效链接扫描结果：书签本体加上这次探测到的错误信息。 */
+type InvalidLink = Bookmark & { message: string }
+
+/** 用户主动忽略的链接，只需要记住网址，标题用于展示。 */
+interface IgnoredLink {
+  title: string
+  url: string
+}
+
+const props = withDefaults(defineProps<{
+  settings: Settings
+  bookmarks?: Bookmark[]
+  backupData?: AppState | null
+}>(), { bookmarks: () => [], backupData: null })
 const emit = defineEmits(['save-settings', 'clear-cookies', 'export', 'data-file', 'reset', 'message'])
-const dialog = ref(null)
-const webdavDialog = ref(null)
-const invalidDialog = ref(null)
-const webdavListDialog = ref(null)
-const restoreInput = ref(null)
-const importInput = ref(null)
+const dialog = ref<HTMLDialogElement | null>(null)
+const webdavDialog = ref<HTMLDialogElement | null>(null)
+const invalidDialog = ref<HTMLDialogElement | null>(null)
+const webdavListDialog = ref<HTMLDialogElement | null>(null)
+const restoreInput = ref<HTMLInputElement | null>(null)
+const importInput = ref<HTMLInputElement | null>(null)
 const activeTab = ref('basic')
 const importMode = ref('append')
 const tabPosition = ref('left')
 const snapshot = ref('')
 const webdav = reactive({ host: '', username: '', password: '' })
 const webdavLoading = ref(false)
-const webdavFiles = ref([])
+const webdavFiles = ref<WebDavFile[]>([])
 const invalidTab = ref('results')
 const scanning = ref(false)
 const scanned = ref(0)
-const invalidResults = ref([])
-const ignoredLinks = ref(readStorage('funlink-ignore-list', []))
+const invalidResults = ref<InvalidLink[]>([])
+let scanToken = 0
+// readStorage 读的是存储里的任意 JSON，这里声明期望的形状。
+const ignoredLinks = ref(readStorage('funlink-ignore-list', []) as IgnoredLink[])
 const checkCandidates = computed(() => props.bookmarks.filter(bookmark => !bookmark.deletedAt && !bookmark.url.includes('{q}') && !ignoredLinks.value.some(item => item.url === bookmark.url)))
 
 function open() {
   activeTab.value = 'basic'
   snapshot.value = JSON.stringify(props.settings)
-  if (!dialog.value.open) dialog.value.showModal()
+  if (!dialog.value?.open) dialog.value?.showModal()
+}
+
+/** catch 到的是 unknown，统一取一句能直接展示给用户的原因。 */
+function reason(caught: unknown) {
+  return caught instanceof Error ? caught.message : String(caught)
 }
 
 function close() {
@@ -41,11 +80,11 @@ function close() {
   dialog.value?.close()
 }
 
-function closeOnBackdrop(event) {
+function closeOnBackdrop(event: MouseEvent) {
   if (event.target === dialog.value) close()
 }
 
-function choose(type, mode = 'append') {
+function choose(type: 'restore' | 'import', mode = 'append') {
   importMode.value = mode
   const extensions = type === 'restore' ? ['json'] : ['html', 'htm']
   const content = window.funlink?.chooseTextFile?.(extensions)
@@ -53,110 +92,175 @@ function choose(type, mode = 'append') {
   else (type === 'restore' ? restoreInput : importInput).value?.click()
 }
 
-async function readFile(type, event) {
-  const file = event.target.files[0]
+async function readFile(type: 'restore' | 'import', event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
   if (file) emit('data-file', type, await file.text(), { mode: importMode.value, tabPosition: tabPosition.value })
-  event.target.value = ''
+  input.value = ''
 }
 
-function changeNumber(key, amount, minimum) {
+function changeNumber(key: 'width' | 'height', amount: number, minimum: number) {
   props.settings.browser[key] = Math.max(minimum, Number(props.settings.browser[key]) + amount)
 }
 
-function toggleSearch(field) {
+function toggleSearch(field: string) {
   const search = props.settings.search
   const index = search.indexOf(field)
   if (index >= 0) search.splice(index, 1)
   else search.push(field)
 }
 
-function openWebdav() {
-  Object.assign(webdav, readStorage('funlink-webdav', { host: '', username: '', password: '' }))
-  webdavDialog.value.showModal()
+/** 密码在存储里是加密的，这里只写加密后的串，内存里的明文不落盘。 */
+async function writeWebdav() {
+  writeStorage('funlink-webdav', { host: webdav.host, username: webdav.username, secret: await encryptSecret(webdav.password) })
 }
 
-function saveWebdav() {
-  writeStorage('funlink-webdav', webdav)
-  webdavDialog.value.close()
+async function readWebdav() {
+  const stored = readStorage('funlink-webdav', {}) as StoredWebdav
+  webdav.host = stored.host || ''
+  webdav.username = stored.username || ''
+  // 1.x 把密码明文存在 dbStorage 里，而 dbStorage 会同步上云。读到明文就当场
+  // 加密重写一遍，把明文从存储里换掉。
+  if (stored.password) {
+    webdav.password = stored.password
+    await writeWebdav()
+    return
+  }
+  webdav.password = await decryptSecret(stored.secret)
+  // 密文只在加密它的那台设备上解得开。同步到新设备后解不出来，得让用户知道
+  // 该重新输一次密码，而不是等点了备份才看到一句「请先配置WebDav」。
+  if (stored.secret && !webdav.password) emit('message', 'WebDav 密码只保存在原设备，请在本机重新输入', true)
+}
+
+// 配置只读一次：解密要跑 PBKDF2，而备份、还原、打开配置框都要用到它。
+let webdavReady: Promise<void> | null = null
+
+function loadWebdav(): Promise<void> {
+  webdavReady ||= readWebdav()
+  return webdavReady
+}
+
+async function openWebdav() {
+  await loadWebdav()
+  webdavDialog.value?.showModal()
+}
+
+async function saveWebdav() {
+  await writeWebdav()
+  webdavDialog.value?.close()
   emit('message', '设置已保存！')
 }
 
-async function webdavAction(action) {
+// 'restore' 并不是直接还原，而是先列出 WebDav 上的备份让用户挑一个，
+// 真正的还原在 restoreWebdav 里。
+async function webdavAction(action: 'backup' | 'restore') {
+  // 配置是存出来的，不能只靠「用户这次打开过配置框」：以前不先点一下 WebDav 配置，
+  // 内存里的 host 还是空的，备份一律报「请先配置」。
+  await loadWebdav()
   if (!webdav.host || !webdav.username || !webdav.password) return emit('message', '请先配置WebDav！', true)
-  if (!window.funlink?.webdavBackup) return emit('message', '当前环境不支持 WebDav', true)
+  // 先把桥接层取到局部变量：window.funlink 是可选属性，await 之后类型收窄会失效。
+  const bridge = window.funlink
+  if (!bridge) return emit('message', '当前环境不支持 WebDav', true)
   webdavLoading.value = true
   try {
     if (action === 'backup') {
       if (!window.confirm('导出内容为明文，可能包含网址、笔记和设置。确认上传到 WebDav？')) return
-      await window.funlink.webdavBackup(JSON.parse(JSON.stringify(webdav)), JSON.stringify(props.backupData, null, 2))
+      await bridge.webdavBackup(JSON.parse(JSON.stringify(webdav)), JSON.stringify(props.backupData, null, 2))
       emit('message', '备份到WebDav成功！')
     } else {
-      const xml = await window.funlink.webdavList(JSON.parse(JSON.stringify(webdav)))
+      const xml = await bridge.webdavList(JSON.parse(JSON.stringify(webdav)))
       const document = new DOMParser().parseFromString(xml, 'application/xml')
       webdavFiles.value = [...document.getElementsByTagNameNS('*', 'response')].flatMap(response => {
-        const value = name => response.getElementsByTagNameNS('*', name)[0]?.textContent || ''
+        const value = (name: string) => response.getElementsByTagNameNS('*', name)[0]?.textContent || ''
         const href = value('href')
         if (!decodeURIComponent(href).endsWith('.json')) return []
-        return [{ href, name: value('displayname') || decodeURIComponent(href.split('/').pop()), size: Number(value('getcontentlength') || 0), modified: value('getlastmodified') }]
-      }).sort((a, b) => new Date(b.modified) - new Date(a.modified))
-      webdavListDialog.value.showModal()
+        return [{ href, name: value('displayname') || decodeURIComponent(href.split('/').pop() || ''), size: Number(value('getcontentlength') || 0), modified: value('getlastmodified') }]
+      }).sort((a, b) => new Date(b.modified).getTime() - new Date(a.modified).getTime())
+      webdavListDialog.value?.showModal()
     }
   } catch (error) {
-    emit('message', `WebDav操作失败：${error.message}`, true)
+    emit('message', `WebDav操作失败：${reason(error)}`, true)
   } finally {
     webdavLoading.value = false
   }
 }
 
-async function restoreWebdav(file) {
+async function restoreWebdav(file: WebDavFile) {
+  const bridge = window.funlink
+  if (!bridge) return emit('message', '当前环境不支持 WebDav', true)
   try {
-    emit('data-file', 'restore', await window.funlink.webdavRestore(JSON.parse(JSON.stringify(webdav)), file.href))
-    webdavListDialog.value.close()
+    emit('data-file', 'restore', await bridge.webdavRestore(JSON.parse(JSON.stringify(webdav)), file.href))
+    webdavListDialog.value?.close()
   } catch (error) {
-    emit('message', `还原失败：${error.message}`, true)
+    emit('message', `还原失败：${reason(error)}`, true)
   }
 }
 
-async function deleteWebdav(file) {
+async function deleteWebdav(file: WebDavFile) {
+  const bridge = window.funlink
+  if (!bridge) return emit('message', '当前环境不支持 WebDav', true)
   try {
-    await window.funlink.webdavDelete(JSON.parse(JSON.stringify(webdav)), file.href)
+    await bridge.webdavDelete(JSON.parse(JSON.stringify(webdav)), file.href)
     webdavFiles.value = webdavFiles.value.filter(item => item.href !== file.href)
     emit('message', '删除成功！')
   } catch (error) {
-    emit('message', `删除失败：${error.message}`, true)
+    emit('message', `删除失败：${reason(error)}`, true)
   }
 }
 
 async function scanInvalidLinks() {
   if (scanning.value) return
+  // 探活要走 preload 的 HEAD 请求，渲染进程里没有这个桥接层就做不了。
+  const bridge = window.funlink
+  if (!bridge) return emit('message', '当前环境不支持链接检测', true)
+  // 一轮扫描一个编号。停止扫描和重新发起都会换号，在飞的请求回来时按号对不上
+  // 就把结果丢掉——几百条链接挨个探活要等很久，用户中途停下后不该再往列表里塞东西。
+  const token = ++scanToken
+  const outdated = () => token !== scanToken
   scanning.value = true
   scanned.value = 0
   invalidResults.value = []
   const queue = checkCandidates.value.slice()
   const worker = async () => {
     while (queue.length) {
+      if (outdated()) return
       const bookmark = queue.shift()
+      // 多个 worker 共享队列，shift 到空就收工。
+      if (!bookmark) break
       try {
-        const status = await window.funlink.checkUrl(bookmark.url)
-        if (status >= 400) invalidResults.value.push({ ...bookmark, message: `${status}错误` })
+        const status = await bridge.checkUrl(bookmark.url)
+        if (!outdated() && status >= 400) invalidResults.value.push({ ...bookmark, message: `${status}错误` })
       } catch (error) {
-        invalidResults.value.push({ ...bookmark, message: error.message })
+        if (!outdated()) invalidResults.value.push({ ...bookmark, message: reason(error) })
       } finally {
-        scanned.value++
+        if (!outdated()) scanned.value++
       }
     }
   }
   await Promise.all(Array.from({ length: Math.min(8, queue.length) }, worker))
+  // 已经被停止、或者被新一轮接管时，这一轮不该再去改按钮状态。
+  if (!outdated()) scanning.value = false
+}
+
+/** 停掉正在进行的扫描，已经查到的结果留在列表里。 */
+function stopScan() {
+  if (!scanning.value) return
+  scanToken++
   scanning.value = false
 }
 
-function ignoreLink(bookmark) {
+function closeInvalidDialog() {
+  stopScan()
+  invalidDialog.value?.close()
+}
+
+function ignoreLink(bookmark: InvalidLink) {
   invalidResults.value = invalidResults.value.filter(item => item.id !== bookmark.id)
   ignoredLinks.value.unshift({ title: bookmark.title, url: bookmark.url })
   writeStorage('funlink-ignore-list', ignoredLinks.value)
 }
 
-function unignoreLink(index) {
+function unignoreLink(index: number) {
   ignoredLinks.value.splice(index, 1)
   writeStorage('funlink-ignore-list', ignoredLinks.value)
 }
@@ -248,7 +352,7 @@ defineExpose({ open, close })
         </section>
         <section class="data-field">
           <h3>链接检查</h3>
-          <button type="button" class="data-button danger" @click="invalidDialog.showModal()">检查无效链接</button>
+          <button type="button" class="data-button danger" @click="invalidDialog?.showModal()">检查无效链接</button>
         </section>
       </div>
     </div>
@@ -258,16 +362,16 @@ defineExpose({ open, close })
 
   <dialog ref="webdavDialog" class="sub-modal webdav-modal">
     <form method="dialog" @submit.prevent="saveWebdav">
-      <header><h2>WebDav配置</h2><button type="button" aria-label="关闭" @click="webdavDialog.close()">×</button></header>
+      <header><h2>WebDav配置</h2><button type="button" aria-label="关闭" @click="webdavDialog?.close()">×</button></header>
       <label><span>服务器</span><input v-model="webdav.host" placeholder="请输入webdav服务器地址" required /></label>
       <label><span>用户名</span><input v-model="webdav.username" placeholder="请输入webdav用户名" required /></label>
       <label><span>密 码</span><input v-model="webdav.password" type="password" placeholder="请输入webdav访问密码" required /></label>
-      <footer><button type="button" class="button" @click="webdavDialog.close()">取消</button><button type="submit" class="button primary">保存</button></footer>
+      <footer><button type="button" class="button" @click="webdavDialog?.close()">取消</button><button type="submit" class="button primary">保存</button></footer>
     </form>
   </dialog>
 
   <dialog ref="webdavListDialog" class="sub-modal webdav-list-modal">
-    <header><h2>已备份文件</h2><button type="button" aria-label="关闭" @click="webdavListDialog.close()">×</button></header>
+    <header><h2>已备份文件</h2><button type="button" aria-label="关闭" @click="webdavListDialog?.close()">×</button></header>
     <div v-if="webdavFiles.length" class="webdav-file-list">
       <div v-for="file in webdavFiles" :key="file.href"><span>{{ file.name }}</span><small>{{ (file.size / 1024).toFixed(2) }}kb</small><button type="button" @click="restoreWebdav(file)">还原</button><button type="button" class="danger-text" @click="deleteWebdav(file)">删除</button></div>
     </div>
@@ -275,7 +379,7 @@ defineExpose({ open, close })
   </dialog>
 
   <dialog ref="invalidDialog" class="invalid-links-modal">
-    <header><button type="button" class="data-button primary" :disabled="scanning" @click="scanInvalidLinks"><i v-if="!scanning" class="iconfont icon-search" aria-hidden="true" /> {{ scanning ? '正在扫描...' : scanned ? '重新检查' : '开始检查' }}</button><button type="button" aria-label="关闭" @click="invalidDialog.close()">×</button></header>
+    <header><button v-if="scanning" type="button" class="data-button warning" @click="stopScan">停止扫描</button><button v-else type="button" class="data-button primary" @click="scanInvalidLinks"><i class="iconfont icon-search" aria-hidden="true" /> {{ scanned ? '重新检查' : '开始检查' }}</button><button type="button" aria-label="关闭" @click="closeInvalidDialog()">×</button></header>
     <div class="invalid-tabs"><button :class="{ active: invalidTab === 'results' }" type="button" @click="invalidTab = 'results'">扫描结果</button><button :class="{ active: invalidTab === 'ignored' }" type="button" @click="invalidTab = 'ignored'">忽略名单</button></div>
     <template v-if="invalidTab === 'results'">
       <div class="invalid-summary">共需检查 <b>{{ checkCandidates.length }}</b> 条链接，<template v-if="scanning">正在检查第 <b>{{ scanned }}</b> 个，已查到 <b>{{ invalidResults.length }}</b> 条无效链接，请稍后...</template><template v-else>点击按钮后开始检查无效链接。</template></div>

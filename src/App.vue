@@ -10,18 +10,23 @@ import NoteDialog from './components/NoteDialog.vue'
 import SecondaryNavigation from './components/SecondaryNavigation.vue'
 import SettingsDialog from './components/SettingsDialog.vue'
 import { useFunLink } from './composables/useFunLink'
+import type { Bookmark, Category } from './lib/types'
 
 const funlink = useFunLink()
 const {
   state, toast, storageError, keywordPrompt, roots, activeCategoryId, activeRootId,
   secondaryCategories, secondaryPosition, trashCount, currentBookmarks, defaultCategoryId,
 } = funlink
-const bookmarkDialog = ref(null)
-const categoryDialog = ref(null)
-const noteDialog = ref(null)
-const settingsDialog = ref(null)
-const draggedBookmarkId = ref(null)
-const context = reactive({ visible: false, type: '', bookmark: null, x: 0, y: 0 })
+// 子组件用 defineExpose 暴露 open/close，模板 ref 标上实例类型后这些方法才能被检查，
+// 写成 ref(null) 的话类型是 null，调用点全是 any。
+const bookmarkDialog = ref<InstanceType<typeof BookmarkDialog> | null>(null)
+const categoryDialog = ref<InstanceType<typeof CategoryDialog> | null>(null)
+const noteDialog = ref<InstanceType<typeof NoteDialog> | null>(null)
+const settingsDialog = ref<InstanceType<typeof SettingsDialog> | null>(null)
+const draggedBookmarkId = ref<string | null>(null)
+// bookmark 必须显式标成 Bookmark | null：写成 reactive({ bookmark: null }) 的话
+// 类型会被推成 null，contextItems 里对它的字段访问就全都逃过了类型检查。
+const context = reactive<{ visible: boolean, type: string, bookmark: Bookmark | null, x: number, y: number }>({ visible: false, type: '', bookmark: null, x: 0, y: 0 })
 const specialView = computed(() => ({
   inbox: { label: '收集箱', icon: 'icon-inbox' },
   favorites: { label: '常用', icon: 'icon-card' },
@@ -45,18 +50,19 @@ const contextItems = computed(() => {
       ]
 })
 
-function openContextMenu(bookmark, event) {
-  const rect = event.currentTarget?.getBoundingClientRect?.()
+function openContextMenu(bookmark: Bookmark, event: MouseEvent) {
+  // DOM 类型里 currentTarget 是 EventTarget，拿不到尺寸，按实际情况收窄成元素。
+  const rect = (event.currentTarget as HTMLElement | null)?.getBoundingClientRect()
   Object.assign(context, {
     visible: true,
     type: 'bookmark',
     bookmark,
-    x: event.type === 'contextmenu' ? event.clientX : rect.right - 134,
-    y: event.type === 'contextmenu' ? event.clientY : rect.bottom + 4,
+    x: event.type === 'contextmenu' ? event.clientX : (rect?.right ?? 0) - 134,
+    y: event.type === 'contextmenu' ? event.clientY : (rect?.bottom ?? 0) + 4,
   })
 }
 
-function openCategoryContextMenu(event) {
+function openCategoryContextMenu(event: MouseEvent) {
   Object.assign(context, { visible: true, type: 'category', bookmark: null, x: event.clientX, y: event.clientY })
 }
 
@@ -66,13 +72,13 @@ function closeContextMenu() {
   context.bookmark = null
 }
 
-function handleContextAction(action) {
+function handleContextAction(action: string) {
   const bookmark = context.bookmark
   closeContextMenu()
-  if (action === 'manage') return categoryDialog.value.open()
+  if (action === 'manage') return categoryDialog.value?.open()
   if (!bookmark) return
-  if (action === 'append') bookmarkDialog.value.open(null, bookmark.id)
-  if (action === 'edit') bookmarkDialog.value.open(bookmark)
+  if (action === 'append') bookmarkDialog.value?.open(null, bookmark.id)
+  if (action === 'edit') bookmarkDialog.value?.open(bookmark)
   if (action === 'favorite') funlink.toggleFavorite(bookmark)
   if (action === 'quick') funlink.toggleQuick(bookmark)
   if (action === 'copy') {
@@ -84,31 +90,31 @@ function handleContextAction(action) {
   if (action === 'delete') funlink.deleteBookmark(bookmark)
 }
 
-function handleDragStart(id, event) {
+function handleDragStart(id: string, event: DragEvent) {
   draggedBookmarkId.value = id
   if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
 }
 
-function handleDrop(targetId) {
+function handleDrop(targetId: string) {
   if (!draggedBookmarkId.value || draggedBookmarkId.value === targetId) return
   funlink.reorderBookmarks(draggedBookmarkId.value, targetId)
   draggedBookmarkId.value = null
 }
 
-function handleDataFile(type, content, options) {
-  if (funlink.processDataFile(type, content, options)) settingsDialog.value.close()
+function handleDataFile(type: 'restore' | 'import', content: string, options: { mode?: string, tabPosition?: Category['tabPosition'] }) {
+  if (funlink.processDataFile(type, content, options)) settingsDialog.value?.close()
 }
 
-function handleReset() {
-  if (funlink.resetData()) settingsDialog.value.close()
+async function handleReset() {
+  if (await funlink.resetData()) settingsDialog.value?.close()
 }
 
-function handleKeydown(event) { if (event.key === 'Escape') closeContextMenu() }
+function handleKeydown(event: KeyboardEvent) { if (event.key === 'Escape') closeContextMenu() }
 
 onMounted(() => {
   document.addEventListener('click', closeContextMenu)
   document.addEventListener('keydown', handleKeydown)
-  funlink.setupUtools({ addBookmark: bookmark => bookmarkDialog.value.open(bookmark) })
+  funlink.setupUtools({ addBookmark: bookmark => bookmarkDialog.value?.open(bookmark) })
 })
 
 onBeforeUnmount(() => {
@@ -128,12 +134,12 @@ onBeforeUnmount(() => {
       @select="funlink.setView"
       @manage="openCategoryContextMenu"
       @cycle-theme="funlink.cycleTheme"
-      @settings="settingsDialog.open()"
+      @settings="settingsDialog?.open()"
     />
 
     <div v-if="storageError" class="storage-alert" role="alert">
       <span>{{ storageError }}为避免覆盖原有数据，已暂停写入。可从备份恢复，或选择重置为示例数据。</span>
-      <button type="button" @click="settingsDialog.open()">从备份恢复</button>
+      <button type="button" @click="settingsDialog?.open()">从备份恢复</button>
       <button type="button" @click="handleReset">重置数据</button>
     </div>
 
@@ -154,9 +160,9 @@ onBeforeUnmount(() => {
             :bookmarks="currentBookmarks"
             :trash-view="state.currentView === 'trash'"
             :show-add="!['trash', 'quick', 'favorites'].includes(state.currentView)"
-            @add="bookmarkDialog.open()"
+            @add="bookmarkDialog?.open()"
             @open="funlink.openLink"
-            @note="noteDialog.open($event)"
+            @note="noteDialog?.open($event)"
             @context-menu="openContextMenu"
             @drag-start="handleDragStart"
             @drop="handleDrop"

@@ -1,25 +1,41 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
+import type { Category, CategoryAction } from '../lib/types'
 
-const props = defineProps({
-  categories: { type: Array, required: true },
-  categoryCount: { type: Function, required: true },
-})
-const emit = defineEmits(['add', 'action'])
-const dialog = ref(null)
+type TabPosition = NonNullable<Category['tabPosition']>
+
+// 放在脚本里而不是模板的内联字面量里，位置值才能被收窄成 TabPosition，
+// 否则传给 setPosition 的是宽泛的 string。
+const POSITIONS: { value: TabPosition, label: string }[] = [
+  { value: 'left', label: '左' },
+  { value: 'right', label: '右' },
+  { value: 'top', label: '上' },
+  { value: 'bottom', label: '下' },
+]
+const props = defineProps<{
+  categories: Category[]
+  /** 统计分类下的卡片数，由父组件从 useFunLink 透传。 */
+  categoryCount: (categoryId: string) => number
+}>()
+const emit = defineEmits<{
+  /** 新增分类：名字、父分类 id（一级分类传空串）、插在哪个分类后面。 */
+  add: [name: string, parentId: string, afterId?: string]
+  action: [id: string, action: CategoryAction]
+}>()
+const dialog = ref<HTMLDialogElement | null>(null)
 const rootName = ref('')
 const popoverName = ref('')
-const expandedIds = ref([])
+const expandedIds = ref<string[]>([])
 const draggedId = ref('')
-const popover = reactive({ id: '', type: '' })
+const popover = reactive({ id: '', type: '', left: 0, top: 0 })
 const roots = computed(() => props.categories.filter(category => !category.parentId))
 const activeCategory = computed(() => props.categories.find(category => category.id === popover.id))
-const childrenOf = id => props.categories.filter(category => category.parentId === id)
+const childrenOf = (id: string) => props.categories.filter(category => category.parentId === id)
 
 function open() {
   expandedIds.value = roots.value.map(root => root.id)
   closePopover()
-  if (!dialog.value.open) dialog.value.showModal()
+  if (!dialog.value?.open) dialog.value?.showModal()
 }
 
 function close() {
@@ -27,7 +43,7 @@ function close() {
   dialog.value?.close()
 }
 
-function closeOnBackdrop(event) {
+function closeOnBackdrop(event: MouseEvent) {
   if (event.target === dialog.value) close()
 }
 
@@ -38,7 +54,7 @@ function addRoot() {
   rootName.value = ''
 }
 
-function toggleExpanded(id) {
+function toggleExpanded(id: string) {
   expandedIds.value = expandedIds.value.includes(id)
     ? expandedIds.value.filter(item => item !== id)
     : [...expandedIds.value, id]
@@ -48,11 +64,14 @@ function closePopover() {
   Object.assign(popover, { id: '', type: '', left: 0, top: 0 })
 }
 
-function togglePopover(id, type, event) {
+function togglePopover(id: string, type: string, event: MouseEvent) {
   const shouldClose = popover.id === id && popover.type === type
   if (shouldClose) return closePopover()
-  const anchor = event.currentTarget.getBoundingClientRect()
-  const modal = dialog.value.getBoundingClientRect()
+  // 气泡要定位到被点的按钮上，所以 currentTarget 必须收窄成元素才能取尺寸。
+  const trigger = event.currentTarget as HTMLElement | null
+  const modal = dialog.value?.getBoundingClientRect()
+  if (!trigger || !modal) return
+  const anchor = trigger.getBoundingClientRect()
   Object.assign(popover, {
     id,
     type,
@@ -62,7 +81,7 @@ function togglePopover(id, type, event) {
   popoverName.value = ''
 }
 
-function addNear(category) {
+function addNear(category: Category) {
   const name = popoverName.value.trim()
   if (!name) return
   const isChild = Boolean(category.parentId)
@@ -72,25 +91,29 @@ function addNear(category) {
   popoverName.value = ''
 }
 
-function rename(category, event) {
-  const name = event.currentTarget.innerText.trim()
+function rename(category: Category, event: FocusEvent) {
+  // contenteditable 的内容在 currentTarget 上，失焦时读回来当新名字。
+  const field = event.currentTarget as HTMLElement | null
+  if (!field) return
+  const name = field.innerText.trim()
   if (!name) {
-    event.currentTarget.innerText = category.name
+    field.innerText = category.name
     return
   }
-  if (name !== category.name) emit('action', category.id, 'rename', name)
+  if (name !== category.name) emit('action', category.id, { type: 'rename', name })
 }
 
-function confirmDelete(category) {
-  emit('action', category.id, 'delete', true)
+function confirmDelete(category: Category) {
+  // 面板里刚点过「确认删除」，不用再弹一次系统确认框。
+  emit('action', category.id, { type: 'delete', confirmed: true })
   closePopover()
 }
 
-function setPosition(category, position) {
-  emit('action', category.id, 'position', position)
+function setPosition(category: Category, position: TabPosition) {
+  emit('action', category.id, { type: 'position', position })
 }
 
-function startDrag(category, event) {
+function startDrag(category: Category, event: DragEvent) {
   draggedId.value = category.id
   if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
 }
@@ -99,20 +122,20 @@ function endDrag() {
   draggedId.value = ''
 }
 
-function dropBefore(target, event) {
+function dropBefore(target: Category, event: DragEvent) {
   event.preventDefault()
   event.stopPropagation()
   if (!draggedId.value || draggedId.value === target.id) return
-  emit('action', draggedId.value, 'move', { parentId: target.parentId || '', targetId: target.id })
+  emit('action', draggedId.value, { type: 'move', parentId: target.parentId || '', targetId: target.id })
   draggedId.value = ''
 }
 
-function dropInto(root, event) {
+function dropInto(root: Category, event: DragEvent) {
   event.preventDefault()
   event.stopPropagation()
   const source = props.categories.find(category => category.id === draggedId.value)
   if (!source || source.id === root.id || childrenOf(source.id).length || props.categoryCount(source.id)) return
-  emit('action', source.id, 'move', { parentId: root.id, targetId: '' })
+  emit('action', source.id, { type: 'move', parentId: root.id, targetId: '' })
   if (!expandedIds.value.includes(root.id)) expandedIds.value.push(root.id)
   draggedId.value = ''
 }
@@ -164,7 +187,7 @@ defineExpose({ open, close })
                 spellcheck="false"
                 :aria-label="`重命名${root.name}`"
                 :textContent="root.name"
-                @keydown.enter.prevent="$event.currentTarget.blur()"
+                @keydown.enter.prevent="($event.currentTarget as HTMLElement).blur()"
                 @blur="rename(root, $event)"
               />
               <span v-if="categoryCount(root.id)" class="category-count">{{ categoryCount(root.id) }}</span>
@@ -212,7 +235,7 @@ defineExpose({ open, close })
                     spellcheck="false"
                     :aria-label="`重命名${child.name}`"
                     :textContent="child.name"
-                    @keydown.enter.prevent="$event.currentTarget.blur()"
+                    @keydown.enter.prevent="($event.currentTarget as HTMLElement).blur()"
                     @blur="rename(child, $event)"
                   />
                   <span v-if="categoryCount(child.id)" class="category-count">{{ categoryCount(child.id) }}</span>
@@ -246,7 +269,7 @@ defineExpose({ open, close })
       >
         <span>二级Tabs位置：</span>
         <div class="position-options">
-          <label v-for="option in [{ value: 'left', label: '左' }, { value: 'right', label: '右' }, { value: 'top', label: '上' }, { value: 'bottom', label: '下' }]" :key="option.value">
+          <label v-for="option in POSITIONS" :key="option.value">
             <input type="radio" :checked="activeCategory.tabPosition === option.value" @change="setPosition(activeCategory, option.value)" />{{ option.label }}
           </label>
         </div>

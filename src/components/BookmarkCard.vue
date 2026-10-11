@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { initials } from '../lib/core'
-import { displayHost, safeColor } from '../composables/useFunLink'
+import { displayHost, safeColor } from '../lib/core'
+import type { Bookmark } from '../lib/types'
 
-const props = defineProps({ bookmark: { type: Object, required: true }, trashView: Boolean })
+const props = withDefaults(defineProps<{ bookmark: Bookmark, trashView?: boolean }>(), { trashView: false })
 const emit = defineEmits(['open', 'note', 'context-menu', 'drag-start', 'drop'])
 // 只用本地图片（用户上传后存成 data URL），不向任何第三方 favicon 服务发请求。
 const iconImage = computed(() => (props.bookmark.iconType === 'image' ? props.bookmark.iconData : '') || '')

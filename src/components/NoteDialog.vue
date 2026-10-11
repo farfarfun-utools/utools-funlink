@@ -1,20 +1,29 @@
 <script setup lang="ts">
 import { nextTick, ref } from 'vue'
 import { initials } from '../lib/core'
-import { safeColor } from '../composables/useFunLink'
+import { sanitizeNoteHtml } from '../lib/sanitize'
+import { safeColor } from '../lib/core'
+import type { Bookmark } from '../lib/types'
 
 const emit = defineEmits(['save'])
-const dialog = ref(null)
-const editor = ref(null)
-const bookmark = ref(null)
+const dialog = ref<HTMLDialogElement | null>(null)
+const editor = ref<HTMLElement | null>(null)
+const bookmark = ref<Bookmark | null>(null)
 const original = ref('')
 
-function open(value) {
+function open(value: Bookmark) {
   bookmark.value = value
-  original.value = value.note || ''
-  if (!dialog.value.open) dialog.value.showModal()
+  if (!dialog.value?.open) dialog.value?.showModal()
   nextTick(() => {
-    editor.value.innerHTML = original.value || '<p></p>'
+    if (!editor.value) return
+    // 笔记可能来自别人的备份文件，所以不走 innerHTML：按白名单重建一棵树再插入，
+    // <img src=x onerror=...> 这类内联事件处理器在重建时就被丢掉了。
+    editor.value.replaceChildren(sanitizeNoteHtml(bookmark.value?.note))
+    // 空笔记补一个空段落，光标才有地方落。
+    if (!editor.value.childNodes.length) editor.value.appendChild(document.createElement('p'))
+    // 比较基准取过滤后的内容：只是打开看一眼不该被判定成修改，
+    // 否则每次浏览笔记都会触发一次整库写盘。
+    original.value = editor.value.innerHTML
     editor.value.focus()
   })
 }
@@ -25,7 +34,7 @@ function close() {
   dialog.value?.close()
 }
 
-function handleKeydown(event) {
+function handleKeydown(event: KeyboardEvent) {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
     event.preventDefault()
     close()

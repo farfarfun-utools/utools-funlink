@@ -58,19 +58,24 @@ export function prepareState(saved: unknown): { state: AppState, dropped: number
 
 // 读不出来时绝不能拿演示数据顶上——那会在下一次写入时覆盖掉用户的真实数据。
 // 返回 blocked 时由界面提示用户，并暂停一切写入。
-/** 从存储读取状态，失败时返回只读提示而不覆盖数据。 */
-export function loadState({ read, seed }: { read: (key: string) => unknown, seed: () => AppState }): { state: AppState, blocked: string, dropped: number } {
+/**
+ * 从存储读取状态，失败时返回只读提示而不覆盖数据。
+ *
+ * 存储确实为空（首次启动）时返回 `empty: true` 的空状态，灌不灌示例数据交给调用方：
+ * 示例数据有 84KB，放在这里就只能同步 import 进来，而它只有首次启动才用得到。
+ */
+export function loadState({ read }: { read: (key: string) => unknown }): { state: AppState, blocked: string, dropped: number, empty: boolean } {
   let saved: unknown
   try {
     saved = read(STORAGE_KEY)
   } catch (error) {
-    return { state: emptyState(), blocked: `本地数据读取失败：${(error as Error).message}。`, dropped: 0 }
+    return { state: emptyState(), blocked: `本地数据读取失败：${(error as Error).message}。`, dropped: 0, empty: false }
   }
-  if (!saved) return { state: seed(), blocked: '', dropped: 0 }
+  if (!saved) return { state: emptyState(), blocked: '', dropped: 0, empty: true }
   try {
     const { state, dropped } = prepareState(saved)
-    return { state, blocked: '', dropped }
+    return { state, blocked: '', dropped, empty: false }
   } catch (error) {
-    return { state: emptyState(), blocked: `本地数据无法解析：${(error as Error).message}。`, dropped: 0 }
+    return { state: emptyState(), blocked: `本地数据无法解析：${(error as Error).message}。`, dropped: 0, empty: false }
   }
 }

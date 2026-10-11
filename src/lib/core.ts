@@ -29,7 +29,7 @@ export function bookmarkMatches(bookmark: Record<string, unknown>, keyword: unkn
 /** 从标题生成最多两个字符的图标缩写。 */
 export function initials(title: unknown): string {
   const words = String(title || 'FL').trim().split(/\s+/)
-  return (words.length > 1 ? words.map(word => word[0]).join('') : words[0]).slice(0, 2).toUpperCase()
+  return (words.length > 1 ? words.map(word => word[0]).join('') : words[0] || '').slice(0, 2).toUpperCase()
 }
 
 /** 清理分类 ID 并保证至少保留一个默认分类。 */
@@ -112,8 +112,9 @@ export function moveItem<T extends { id: string }>(items: T[], sourceId: string,
   const to = items.findIndex(item => item.id === targetId)
   if (from < 0 || to < 0 || from === to) return items
   const next = items.slice()
-  const [item] = next.splice(from, 1)
-  next.splice(to, 0, item)
+  // 用展开而不是 next.splice(from, 1)[0]：下标访问的类型带 undefined，
+  // 而这里 from 已经校验过，取出来一定是一条。
+  next.splice(to, 0, ...next.splice(from, 1))
   return next
 }
 
@@ -122,8 +123,10 @@ export function moveCategory(items: Category[], sourceId: string, parentId: stri
   const from = items.findIndex(item => item.id === sourceId)
   if (from < 0 || sourceId === targetId) return items
   const next = items.slice()
-  const category = { ...next.splice(from, 1)[0] }
-  category.parentId = parentId
+  const removed = next.splice(from, 1)[0]
+  // from 已校验 >= 0，splice 必然取到一条；这个判空只是为了让下标访问的类型落地。
+  if (!removed) return items
+  const category: Category = { ...removed, parentId }
   const target = targetId ? next.findIndex(item => item.id === targetId) : -1
   if (target >= 0) next.splice(target, 0, category)
   else {
@@ -163,4 +166,20 @@ export function parseBookmarkHtml(html: string): { title: string, url: string }[
       return []
     }
   }).filter((bookmark, index, all) => all.findIndex(item => item.url === bookmark.url) === index)
+}
+
+/** 取网址的源（协议 + 域名 + 端口），解析不出来时返回空串。 */
+export function originOf(url: string): string {
+  try { return new URL(url).origin } catch { return '' }
+}
+
+/** 从网址提取展示用主机名。 */
+export function displayHost(url: string): string {
+  try { return new URL(url).hostname || url } catch { return url }
+}
+
+/** 校验颜色值，非法值回退到默认颜色。 */
+export function safeColor(value: unknown): string {
+  const text = String(value || '')
+  return /^(#[\da-f]{3,8}|rgba?\([\d\s.,%]+\))$/i.test(text) ? text : '#16b8c7'
 }

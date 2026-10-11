@@ -1,8 +1,8 @@
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import {
-  bookmarkMatches, createId, isSafeUrl, migrateBookmark, migrateState, moveCategory, moveItem,
-  normalizeCategoryIds, normalizeUrl, splitTitle, validateState,
+  bookmarkMatches, createId, displayHost, isSafeUrl, migrateBookmark, migrateState, moveCategory,
+  moveItem, normalizeCategoryIds, normalizeUrl, safeColor, splitTitle, validateState,
 } from '../src/lib/core.ts'
 
 test('core bookmark operations stay predictable', () => {
@@ -90,4 +90,21 @@ test('createId does not collide within the same millisecond', () => {
   const ids = new Set(Array.from({ length: 500 }, () => createId('bookmark')))
   assert.equal(ids.size, 500)
   assert.equal([...ids].every(id => id.startsWith('bookmark-')), true)
+})
+
+test('displayHost 取主机名，取不出来就原样返回', () => {
+  assert.equal(displayHost('https://www.example.com/a/b?c=1'), 'www.example.com')
+  assert.equal(displayHost('https://search.example.com?q={q}'), 'search.example.com')
+  // 带 {q} 占位符的站内搜索网址、用户手敲一半的网址都解析不成 URL。
+  assert.equal(displayHost('example'), 'example')
+  assert.equal(displayHost(''), '')
+})
+
+// 颜色值会被拼进 style 属性，必须拦住非法内容，否则等于开了个注入口子。
+test('safeColor 只放过颜色字面量，其余回退到默认色', () => {
+  assert.equal(safeColor('#fff'), '#fff')
+  assert.equal(safeColor('#16B8C7'), '#16B8C7')
+  assert.equal(safeColor('rgba(1, 2, 3, 0.5)'), 'rgba(1, 2, 3, 0.5)')
+  assert.equal(safeColor('red; background: url(javascript:alert(1))'), '#16b8c7')
+  assert.equal(safeColor(undefined), '#16b8c7')
 })

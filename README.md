@@ -31,6 +31,21 @@ FunLink 是一个面向 uTools 的网址收藏与快速访问插件。它把零�
 https://www.bing.com/search?q={q}
 ```
 
+### AI 与 MCP
+
+插件向 AI 暴露了四个工具，`utools.ai()` 的 Function Calling 和用户开启 uTools MCP 服务后的
+第三方 AI Agent 都能调用：
+
+| 工具 | 作用 |
+| --- | --- |
+| `search_bookmarks` | 按关键词搜收藏，返回标题、网址、简介和分类 |
+| `list_categories` | 列出分类及各分类下的网址数 |
+| `add_bookmark` | 收藏一个网址，已收藏过的不会重复添加 |
+| `open_bookmark` | 打开已收藏的网址，站内搜索类网址需带 `query` |
+
+工具只提供查、增、打开三类能力。删除卡片、清空废纸篓、恢复备份这类破坏性操作不对外开放：
+Agent 调用时机不在用户视野里，误删整库的代价远大于省下的几次点击。
+
 ### 数据与外观
 
 - 导出和恢复 FunLink JSON 备份，或备份到 WebDav

@@ -1,90 +1,67 @@
-import { computed, reactive, ref } from 'vue'
-import { bookmarkMatches, createId, initials, isSafeUrl, moveCategory, moveItem, normalizeCategoryIds, parseBookmarkHtml, splitTitle } from '../lib/core'
+import { computed, ref } from 'vue'
+import { createId, displayHost, initials, isSafeUrl, moveCategory, moveItem, normalizeCategoryIds, originOf, parseBookmarkHtml, splitTitle } from '../lib/core'
+import { removeQuickFeature, resetQuickFeatures, syncQuickFeature } from '../lib/features'
 import { STORAGE_KEY, categoryIdsOf, loadState, prepareState } from '../lib/state'
 import { convertLegacyExport, isLegacyExport } from '../lib/legacy'
-import { readStorage, writeStorage } from '../lib/storage'
-import type { AppState, Bookmark, Category } from '../lib/types'
-import firstData from '../data/firstData.json'
+import { commitStorage, readStorage, serializeForStorage } from '../lib/storage'
+import * as views from '../lib/views'
+import type { AppState, Bookmark, Category, CategoryAction } from '../lib/types'
+import { registerAiTools } from './useAiTools'
+import { useKeywordPrompt } from './useKeywordPrompt'
+import { useToast } from './useToast'
+import { setupUtoolsHost } from './useUtoolsHost'
+
+export { PLUGIN_HEIGHT } from './useUtoolsHost'
 
 const COLORS = ['#16b8c7', '#2563eb', '#7c3aed', '#db2777', '#e85d3f', '#0f9f6e', '#64748b']
 
 // 示例数据本身就是「网址精灵」的文档格式，直接复用导入用的转换器，
 // 免得示例数据和真实导入走两套映射、行为不一致。
-function seedState() {
+//
+// 用动态 import 而不是顶部静态 import：这份 JSON 有 84KB，压进主包要占四分之一的
+// 体积，但只有首次启动和「恢复示例数据」才读得到，老用户每次启动都白解析一遍。
+async function seedState(): Promise<AppState> {
+  const { default: firstData } = await import('../data/firstData.json')
   return convertLegacyExport(firstData).state
 }
 
 /** 提供收藏状态、导入导出及 uTools 交互能力。 @returns {object} */
 export function useFunLink() {
-  const loaded = loadState({ read: readStorage, seed: seedState })
+  const loaded = loadState({ read: readStorage })
   const state = ref(loaded.state)
   const storageError = ref(loaded.blocked)
   const search = ref('')
-  const toast = reactive({ visible: false, message: '', error: false })
-  const keywordPrompt = reactive({ visible: false, title: '', value: '' })
-  let keywordResolve: ((value: string) => void) | null = null
-  let toastTimer: ReturnType<typeof setTimeout> | undefined
+  const { toast, showToast } = useToast()
+  const { keywordPrompt, askKeyword, resolveKeyword } = useKeywordPrompt()
+  let lastSavedJson = ''
 
+  const childrenOf = (parentId: string): Category[] => views.childrenOf(state.value.categories, parentId)
   const roots = computed(() => state.value.categories.filter(category => !category.parentId))
-  const activeCategoryId = computed(() => state.value.currentView.startsWith('category:')
-    ? state.value.currentView.slice(9)
-    : state.value.currentView === 'trash' ? state.value.lastCategoryId : '')
-  const activeRootId = computed(() => {
-    const category = state.value.categories.find(item => item.id === activeCategoryId.value)
-    return category?.parentId || category?.id || ''
-  })
-  const childrenOf = (parentId: string): Category[] => state.value.categories.filter(category => category.parentId === parentId)
+  const activeCategoryId = computed(() => views.activeCategoryId(state.value))
+  const activeRootId = computed(() => views.activeRootId(state.value))
   const secondaryCategories = computed(() => state.value.currentView.startsWith('category:') && activeRootId.value ? childrenOf(activeRootId.value) : [])
   const secondaryPosition = computed(() => state.value.categories.find(category => category.id === activeRootId.value)?.tabPosition || 'top')
   const trashCount = computed(() => state.value.bookmarks.filter(bookmark => bookmark.deletedAt).length)
-  const currentBookmarks = computed(() => {
-    const active = state.value.bookmarks.filter(bookmark => !bookmark.deletedAt)
-    let bookmarks
+  const currentBookmarks = computed(() => views.visibleBookmarks(state.value, search.value))
+  const defaultCategoryId = computed(() => views.defaultCategoryId(state.value))
 
-    // 废纸篓要先判断：否则一搜索就跳去搜全部未删除卡片，废纸篓里反而搜不到东西。
-    if (state.value.currentView === 'trash') bookmarks = state.value.bookmarks.filter(bookmark => bookmark.deletedAt)
-    else if (search.value.trim()) bookmarks = active
-    else if (state.value.currentView === 'all') bookmarks = active
-    else if (state.value.currentView === 'favorites') bookmarks = active.filter(bookmark => bookmark.favorite)
-    else if (state.value.currentView === 'quick') bookmarks = active.filter(bookmark => bookmark.quick)
-    else if (state.value.currentView === 'inbox') bookmarks = active.filter(bookmark => categoryIdsOf(bookmark).includes('cat@default') || !categoryIdsOf(bookmark).length)
-    else {
-      const category = state.value.categories.find(item => item.id === activeCategoryId.value)
-      const ids = category && !category.parentId
-        ? new Set([category.id, ...childrenOf(category.id).map(item => item.id)])
-        : new Set([activeCategoryId.value])
-      bookmarks = active.filter(bookmark => categoryIdsOf(bookmark).some(id => ids.has(id)))
-    }
-    return bookmarks.filter(bookmark => bookmarkMatches(bookmark, search.value, state.value.settings.search))
-  })
-  const defaultCategoryId = computed(() => state.value.currentView === 'inbox'
-    ? 'cat@default'
-    : state.value.categories.some(category => category.id === activeCategoryId.value) ? activeCategoryId.value : 'cat@default')
-
-  function saveState() {
-    if (storageError.value) return
-    writeStorage(STORAGE_KEY, state.value)
-  }
-
-  function showToast(message: string, error = false) {
-    clearTimeout(toastTimer)
-    Object.assign(toast, { visible: true, message, error })
-    toastTimer = setTimeout(() => { toast.visible = false }, 3200)
-  }
-
-  // Electron 不实现 window.prompt，站内搜索的关键词改用应用内对话框获取。
-  function askKeyword(title: string) {
-    return new Promise<string>(resolve => {
-      keywordResolve = resolve
-      Object.assign(keywordPrompt, { visible: true, title, value: '' })
-    })
-  }
-
-  function resolveKeyword(value = '') {
-    keywordPrompt.visible = false
-    const resolve = keywordResolve
-    keywordResolve = null
-    resolve?.(String(value).trim())
+  /**
+   * 把当前状态写回存储。这里是所有改动落盘的唯一出口。
+   * 写失败时自己弹错误提示，并返回 false——调用方必须据此决定还要不要报「已保存」，
+   * 否则成功提示会盖掉错误提示，用户看到的就是一次假成功。
+   */
+  function saveState(): boolean {
+    if (storageError.value) return false
+    const snapshot = serializeForStorage(state.value)
+    // 内容和上次写进去的完全一样就不再写。整库收藏压在一个文档里，一次保存就是
+    // 全量落盘加一次云同步，而点同一个导航、把卡片拖回原处这类空操作很常见。
+    // 初值留空而不是用读出来的状态：读的时候做过迁移和补默认值，第一次保存
+    // 要把迁移结果落下去。
+    if (snapshot.json === lastSavedJson) return true
+    const result = commitStorage(STORAGE_KEY, snapshot)
+    if (!result.ok) showToast(result.message || '保存失败', true)
+    else lastSavedJson = snapshot.json
+    return result.ok
   }
 
   function setView(view: string) {
@@ -98,45 +75,33 @@ export function useFunLink() {
     saveState()
   }
 
-  function syncQuickFeature(bookmark: Bookmark) {
-    if (!window.utools?.setFeature) return
-    const code = `open-link@${bookmark.id}`
-    if (!bookmark.quick) {
-      window.utools.removeFeature?.(code)
-      return
-    }
-    const cmds = bookmark.url.includes('{q}') ? [bookmark.title, { type: 'over', label: bookmark.title }] : [bookmark.title]
-    window.utools.setFeature({ code, explain: `打开 ${bookmark.title}`, icon: 'logo.png', mainHide: true, cmds })
-  }
-
-  // 整体替换数据后（恢复备份 / 重置）重建快开入口，否则旧入口还在、新的一个都没注册。
-  function syncAllQuickFeatures() {
-    if (!window.utools?.setFeature) return
-    window.utools.getFeatures?.()?.forEach((feature: { code?: string }) => {
-      if (feature?.code?.startsWith('open-link@')) window.utools.removeFeature?.(feature.code)
-    })
-    state.value.bookmarks.filter(bookmark => bookmark.quick && !bookmark.deletedAt).forEach(syncQuickFeature)
-  }
-
-  function saveBookmark(input: Partial<Bookmark>, afterId: string | null = null) {
+  /** 新增或更新一张卡片。返回是否真的写进了存储，AI 工具据此判断要不要报错。 */
+  function saveBookmark(input: Partial<Bookmark>, afterId: string | null = null): boolean {
     const id = input.id || createId('bookmark')
     const previous = state.value.bookmarks.find(bookmark => bookmark.id === id)
     const categoryIds = normalizeCategoryIds(input.categoryIds || (input.categoryId ? [input.categoryId] : []))
-    const bookmark: Bookmark = { ...previous, ...input, id, categoryId: categoryIds[0], categoryIds, note: previous?.note || '', deletedAt: null }
+    const bookmark: Bookmark = {
+      ...previous, ...input, id,
+      // title/url 是必填字段，但 input 是 Partial（主搜索框只带 url 进来），
+      // 编辑时从原记录兜底，新增时表单已经校验过非空。
+      title: input.title ?? previous?.title ?? '',
+      url: input.url ?? previous?.url ?? '',
+      categoryId: categoryIds[0], categoryIds, note: previous?.note || '', deletedAt: null,
+    }
     if (previous) state.value.bookmarks[state.value.bookmarks.indexOf(previous)] = bookmark
     else if (afterId) state.value.bookmarks.splice(state.value.bookmarks.findIndex(item => item.id === afterId) + 1, 0, bookmark)
     else state.value.bookmarks.push(bookmark)
     syncQuickFeature(bookmark)
-    saveState()
-    showToast(previous ? '网址已更新' : '网址已添加')
+    const saved = saveState()
+    if (saved) showToast(previous ? '网址已更新' : '网址已添加')
+    return saved
   }
 
   function saveNote(id: string, note: string) {
     const bookmark = state.value.bookmarks.find(item => item.id === id)
     if (!bookmark) return
     bookmark.note = note
-    saveState()
-    showToast('笔记已保存')
+    if (saveState()) showToast('笔记已保存')
   }
 
   function urlsOf(bookmark: Bookmark): string[] {
@@ -170,15 +135,13 @@ export function useFunLink() {
 
   function toggleFavorite(bookmark: Bookmark) {
     bookmark.favorite = !bookmark.favorite
-    saveState()
-    showToast(bookmark.favorite ? '已加入常用' : '已取消常用')
+    if (saveState()) showToast(bookmark.favorite ? '已加入常用' : '已取消常用')
   }
 
   function toggleQuick(bookmark: Bookmark) {
     bookmark.quick = !bookmark.quick
     syncQuickFeature(bookmark)
-    saveState()
-    showToast(bookmark.quick ? '已开启网页快开' : '已关闭网页快开')
+    if (saveState()) showToast(bookmark.quick ? '已开启网页快开' : '已关闭网页快开')
   }
 
   function moveToTrash(bookmark: Bookmark) {
@@ -186,8 +149,7 @@ export function useFunLink() {
     bookmark.deletedAt = Date.now()
     bookmark.quick = false
     syncQuickFeature(bookmark)
-    saveState()
-    showToast('已移到废纸篓')
+    if (saveState()) showToast('已移到废纸篓')
   }
 
   function restoreBookmark(bookmark: Bookmark) {
@@ -196,16 +158,14 @@ export function useFunLink() {
     if (!bookmark.categoryIds.length) bookmark.categoryIds = ['cat@default']
     bookmark.deletedAt = null
     delete bookmark.previousCategoryIds
-    saveState()
-    showToast('网址已恢复')
+    if (saveState()) showToast('网址已恢复')
   }
 
   function deleteBookmark(bookmark: Bookmark) {
     if (!window.confirm(`永久删除“${bookmark.title}”？此操作无法撤销。`)) return
     state.value.bookmarks = state.value.bookmarks.filter(item => item.id !== bookmark.id)
-    window.utools?.removeFeature?.(`open-link@${bookmark.id}`)
-    saveState()
-    showToast('网址已永久删除')
+    removeQuickFeature(bookmark.id)
+    if (saveState()) showToast('网址已永久删除')
   }
 
   function emptyTrash() {
@@ -213,8 +173,7 @@ export function useFunLink() {
     if (!deleted.length) return showToast('废纸篓已经是空的')
     if (!window.confirm(`永久删除废纸篓中的 ${deleted.length} 个网址？此操作无法撤销。`)) return
     state.value.bookmarks = state.value.bookmarks.filter(bookmark => !bookmark.deletedAt)
-    saveState()
-    showToast('废纸篓已清空')
+    if (saveState()) showToast('废纸篓已清空')
   }
 
   function reorderBookmarks(sourceId: string, targetId: string) {
@@ -235,16 +194,17 @@ export function useFunLink() {
     saveState()
   }
 
-  function categoryAction(id: string, action: string, value: any) {
+  function categoryAction(id: string, action: CategoryAction) {
     const category = state.value.categories.find(item => item.id === id)
     if (!category) return
-    if (action === 'rename') {
-      const name = typeof value === 'string' ? value.trim() : ''
-      if (name) category.name = name
+    if (action.type === 'rename') {
+      const name = action.name.trim()
+      if (!name) return
+      category.name = name
     }
-    if (action === 'delete') {
+    if (action.type === 'delete') {
       const descendants = new Set([id, ...childrenOf(id).map(item => item.id)])
-      if (value !== true && !window.confirm(`删除“${category.name}”？分类中的网址会移到收集箱。`)) return
+      if (!action.confirmed && !window.confirm(`删除“${category.name}”？分类中的网址会移到收集箱。`)) return
       state.value.categories = state.value.categories.filter(item => !descendants.has(item.id))
       state.value.bookmarks.forEach(bookmark => {
         bookmark.categoryIds = categoryIdsOf(bookmark).filter(categoryId => !descendants.has(categoryId))
@@ -253,18 +213,8 @@ export function useFunLink() {
       })
       if (descendants.has(activeCategoryId.value)) state.value.currentView = 'inbox'
     }
-    if (action === 'up' || action === 'down') {
-      const siblings = state.value.categories.filter(item => item.parentId === category.parentId)
-      const target = siblings[siblings.findIndex(item => item.id === id) + (action === 'up' ? -1 : 1)]
-      if (target) {
-        const index = state.value.categories.indexOf(category)
-        const targetIndex = state.value.categories.indexOf(target)
-        state.value.categories[index] = target
-        state.value.categories[targetIndex] = category
-      }
-    }
-    if (action === 'position' && ['left', 'right', 'top', 'bottom'].includes(value)) category.tabPosition = value as Category['tabPosition']
-    if (action === 'move' && value) state.value.categories = moveCategory(state.value.categories, id, value.parentId, value.targetId)
+    if (action.type === 'position') category.tabPosition = action.position
+    if (action.type === 'move') state.value.categories = moveCategory(state.value.categories, id, action.parentId, action.targetId)
     saveState()
   }
 
@@ -279,18 +229,32 @@ export function useFunLink() {
   }
 
   function saveSettings() {
-    saveState()
-    showToast('设置已保存！')
+    if (saveState()) showToast('设置已保存！')
   }
 
-  function clearCookies() {
-    window.utools?.db?.allDocs?.('cookie@')?.forEach((document: { _id: string }) => window.utools.db.remove(document._id))
-    showToast('cookies已清空！')
+  // 原来的实现是删 dbStorage 里 cookie@ 开头的文档——那是「网址精灵」留下的东西，
+  // FunLink 从不写，内置浏览器的 Cookie 也不存在那里，所以点了等于没点，还白报一句
+  // 「已清空」。真正的入口只有 ubrowser 链上的 clearCookies，它按 URL 清，
+  // 所以把库里所有网址的源过一遍。
+  async function clearCookies() {
+    const ubrowser = window.utools?.ubrowser
+    if (!ubrowser) return showToast('当前环境没有内置浏览器', true)
+    const origins = [...new Set(state.value.bookmarks.flatMap(urlsOf).map(originOf).filter(Boolean))]
+    if (!origins.length) return showToast('没有需要清理的 Cookies')
+    try {
+      // 不显示窗口：只是借 ubrowser 执行一遍清理队列。
+      await origins
+        .reduce((chain, origin) => chain.clearCookies(origin), ubrowser.goto('about:blank'))
+        .run({ show: false, width: 100, height: 100 })
+      showToast('内置浏览器 Cookies 已清空')
+    } catch (error) {
+      showToast(`清空 Cookies 失败：${error instanceof Error ? error.message : String(error)}`, true)
+    }
   }
 
   function cycleTheme() {
     const order: AppState['theme'][] = ['system', 'light', 'dark']
-    setTheme(order[(order.indexOf(state.value.theme) + 1) % order.length])
+    setTheme(order[(order.indexOf(state.value.theme) + 1) % order.length] ?? 'system')
     showToast({ system: '跟随系统主题', light: '已切换浅色主题', dark: '已切换深色主题' }[state.value.theme])
   }
 
@@ -306,100 +270,105 @@ export function useFunLink() {
     showToast('备份已导出')
   }
 
+  function restoreBackup(content: string): boolean {
+    const parsed = JSON.parse(content)
+    // 既接受 FunLink 自己的备份，也接受「网址精灵」导出的 { db, flyDb } / 裸数组。
+    const source = isLegacyExport(parsed) ? convertLegacyExport(parsed).state : parsed
+    const { state: restored, dropped } = prepareState(source)
+    state.value = restored
+    // 恢复成功即说明拿到了可用数据，可以解除只读保护。
+    storageError.value = ''
+    // 备份体积超过单文档上限时写不进去，这时界面上是恢复好的、存储里还是旧数据，
+    // 必须按失败报出来，否则用户关掉插件才发现恢复没生效。
+    const saved = saveState()
+    applyTheme()
+    resetQuickFeatures(state.value.bookmarks)
+    if (saved) showToast(dropped ? `备份已恢复，已跳过 ${dropped} 条无效网址` : '备份已恢复')
+    return saved
+  }
+
+  function importBookmarks(content: string, options: { mode?: string, tabPosition?: Category['tabPosition'] }): boolean {
+    const imported = parseBookmarkHtml(content)
+    if (options.mode === 'replace') {
+      state.value.bookmarks.filter(bookmark => bookmark.quick).forEach(bookmark => removeQuickFeature(bookmark.id))
+      state.value.categories = []
+      state.value.bookmarks = []
+    }
+    const categoryId = createId('category-import')
+    state.value.categories.push({ id: categoryId, name: '导入书签', parentId: '', tabPosition: options.tabPosition || 'left' })
+    const existing = new Set(state.value.bookmarks.map(bookmark => bookmark.url))
+    const bookmarks: Bookmark[] = imported.filter(bookmark => !existing.has(bookmark.url)).map((bookmark, index): Bookmark => {
+      // 浏览器书签常写成「名称 - 简介」，按设置里的分隔符拆开。
+      const { title, description } = splitTitle(bookmark.title, state.value.settings.importSplit)
+      return {
+        ...bookmark,
+        id: createId('bookmark-import'),
+        title: title || bookmark.title,
+        description: description || displayHost(bookmark.url),
+        categoryId,
+        categoryIds: [categoryId],
+        color: COLORS[index % COLORS.length],
+        iconType: 'text',
+        icon: initials(title || bookmark.title),
+        urls: [],
+        browser: '', favorite: false, quick: false, note: '', deletedAt: null,
+      }
+    })
+    state.value.bookmarks.push(...bookmarks)
+    state.value.currentView = `category:${categoryId}`
+    const saved = saveState()
+    if (saved) showToast(`已导入 ${bookmarks.length} 个网址`)
+    return saved
+  }
+
+  /** 恢复备份或导入浏览器书签。两条路都可能拿到脏数据，异常统一在这里转成提示。 */
   function processDataFile(type: 'restore' | 'import', content: string, options: { mode?: string, tabPosition?: Category['tabPosition'] } = {}): boolean {
     try {
-      if (type === 'restore') {
-        const parsed = JSON.parse(content)
-        // 既接受 FunLink 自己的备份，也接受「网址精灵」导出的 { db, flyDb } / 裸数组。
-        const source = isLegacyExport(parsed) ? convertLegacyExport(parsed).state : parsed
-        const { state: restored, dropped } = prepareState(source)
-        state.value = restored
-        // 恢复成功即说明拿到了可用数据，可以解除只读保护。
-        storageError.value = ''
-        saveState()
-        applyTheme()
-        syncAllQuickFeatures()
-        showToast(dropped ? `备份已恢复，已跳过 ${dropped} 条无效网址` : '备份已恢复')
-        return true
-      }
-      const imported = parseBookmarkHtml(content)
-      if (options.mode === 'replace') {
-        state.value.bookmarks.filter(bookmark => bookmark.quick).forEach(bookmark => window.utools?.removeFeature?.(`open-link@${bookmark.id}`))
-        state.value.categories = []
-        state.value.bookmarks = []
-      }
-      const categoryId = createId('category-import')
-      state.value.categories.push({ id: categoryId, name: '导入书签', parentId: '', tabPosition: options.tabPosition || 'left' })
-      const existing = new Set(state.value.bookmarks.map(bookmark => bookmark.url))
-      const bookmarks: Bookmark[] = imported.filter(bookmark => !existing.has(bookmark.url)).map((bookmark, index): Bookmark => {
-        // 浏览器书签常写成「名称 - 简介」，按设置里的分隔符拆开。
-        const { title, description } = splitTitle(bookmark.title, state.value.settings.importSplit)
-        return {
-          ...bookmark,
-          id: createId('bookmark-import'),
-          title: title || bookmark.title,
-          description: description || displayHost(bookmark.url),
-          categoryId,
-          categoryIds: [categoryId],
-          color: COLORS[index % COLORS.length],
-          iconType: 'text',
-          icon: initials(title || bookmark.title),
-          urls: [],
-          browser: '', favorite: false, quick: false, note: '', deletedAt: null,
-        }
-      })
-      state.value.bookmarks.push(...bookmarks)
-      state.value.currentView = `category:${categoryId}`
-      saveState()
-      showToast(`已导入 ${bookmarks.length} 个网址`)
-      return true
+      return type === 'restore' ? restoreBackup(content) : importBookmarks(content, options)
     } catch (error) {
       showToast((error as Error).message, true)
       return false
     }
   }
 
-  function resetData() {
+  async function resetData() {
     if (!window.confirm('恢复示例数据？当前数据会被覆盖。')) return false
-    state.value.bookmarks.filter(bookmark => bookmark.quick).forEach(bookmark => window.utools?.removeFeature?.(`open-link@${bookmark.id}`))
-    state.value = seedState()
+    state.value.bookmarks.filter(bookmark => bookmark.quick).forEach(bookmark => removeQuickFeature(bookmark.id))
+    state.value = await seedState()
     // 用户明确选择了覆盖，此时解除只读保护。
     storageError.value = ''
-    saveState()
+    const saved = saveState()
     applyTheme()
-    syncAllQuickFeatures()
-    showToast('已恢复示例数据')
-    return true
+    resetQuickFeatures(state.value.bookmarks)
+    if (saved) showToast('已恢复示例数据')
+    return saved
   }
 
   function setupUtools({ addBookmark }: { addBookmark: (input: Partial<Bookmark>) => void }) {
-    window.utools?.setExpendHeight?.(558)
-    window.utools?.setSubInput?.(({ text }: { text?: string }) => { search.value = text || '' }, '搜索卡片', true)
-    window.funlink?.onEnter(async (action: { code?: string, payload?: string }) => {
-      if (action.code?.startsWith('open-link@')) {
-        const bookmark = state.value.bookmarks.find(item => item.id === action.code.slice(10))
-        if (bookmark) {
-          // 等 openLink 结束再退出，否则关键词还没输入插件就被关掉了。
-          await openLink(bookmark, action.payload)
-          window.utools?.outPlugin?.()
-        }
-        return
-      }
-      window.utools?.setExpendHeight?.(558)
-      if (action.code === 'add-link') addBookmark({ url: String(action.payload || '').trim() })
-      if (action.code === 'search-link') search.value = String(action.payload || '')
+    setupUtoolsHost({
+      state,
+      search,
+      openLink,
+      addBookmark,
+      // 关键词对话框的 Promise 还挂着，不解决掉下次进来对话框还在。
+      dismissKeyword: () => { if (keywordPrompt.visible) resolveKeyword('') },
     })
-    window.utools?.onMainPush?.(({ payload }: { payload?: string }) => state.value.bookmarks
-      .filter(bookmark => !bookmark.deletedAt && !bookmark.url.includes('{q}') && bookmarkMatches(bookmark, payload, state.value.settings.search))
-      .slice(0, 6)
-      .map(bookmark => ({ icon: 'logo.png', text: bookmark.title, title: bookmark.description || displayHost(bookmark.url), bookmarkId: bookmark.id })),
-    ({ payload, option }: { payload?: string, option: { bookmarkId: string } }) => {
-      const bookmark = state.value.bookmarks.find(item => item.id === option.bookmarkId)
-      if (bookmark) openLink(bookmark, payload)
-    })
+    // 和宿主事件一起注册，都在页面初始化阶段：AI / MCP 调用不会触发进入插件事件，
+    // 注册代码要是挂在那上面就永远不会执行。
+    registerAiTools({ state, saveBookmark, openLink })
   }
 
   applyTheme()
+
+  // 首次启动：示例数据所在的异步块到位后再填进来，这之前界面是空的。
+  // 期间用户可能已经自己加了卡片，那就别覆盖人家的东西。
+  if (loaded.empty) {
+    seedState().then(seeded => {
+      if (state.value.bookmarks.length || state.value.categories.length) return
+      state.value = seeded
+      applyTheme()
+    })
+  }
 
   return {
     state, search, toast, storageError, keywordPrompt, roots, activeCategoryId, activeRootId,
@@ -410,15 +379,4 @@ export function useFunLink() {
     setTheme, cycleTheme, saveSettings, clearCookies, exportBackup, processDataFile, resetData,
     setupUtools, showToast, resolveKeyword,
   }
-}
-
-/** 从网址提取展示用主机名。 */
-export function displayHost(url: string): string {
-  try { return new URL(url).hostname || url } catch { return url }
-}
-
-/** 校验颜色值，非法值回退到默认颜色。 */
-export function safeColor(value: unknown): string {
-  const text = String(value || '')
-  return /^(#[\da-f]{3,8}|rgba?\([\d\s.,%]+\))$/i.test(text) ? text : '#16b8c7'
 }

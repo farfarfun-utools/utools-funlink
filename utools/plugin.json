@@ -12,14 +12,16 @@
   "features": [
     {
       "code": "funlink",
-      "explain": "收藏、分类和快速打开网址",
+      "description": "收藏、分类和快速打开网址",
       "icon": "logo.png",
+      "platform": ["darwin", "win32", "linux"],
       "cmds": ["FunLink", "网址收藏", "网址导航", "网页收藏", "web"]
     },
     {
       "code": "search-link",
-      "explain": "搜索 FunLink 中的网址",
+      "description": "搜索 FunLink 中的网址",
       "icon": "search.png",
+      "platform": ["darwin", "win32", "linux"],
       "cmds": [
         {
           "type": "over",
@@ -32,8 +34,9 @@
     },
     {
       "code": "add-link",
-      "explain": "添加网址到 FunLink",
+      "description": "添加网址到 FunLink",
       "icon": "logo.png",
+      "platform": ["darwin", "win32", "linux"],
       "cmds": [
         {
           "type": "regex",
@@ -43,5 +46,77 @@
       ]
     }
   ],
-  "platform": ["darwin", "win32", "linux"]
+  "tools": {
+    "search_bookmarks": {
+      "description": "搜索用户在 FunLink（网址收藏）里收藏的网址，返回标题、网址、简介和所属分类。关键词留空则返回收藏列表的开头几条。",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "keyword": {
+            "type": "string",
+            "description": "搜索关键词，匹配标题、简介和网址；留空返回全部"
+          },
+          "limit": {
+            "type": "number",
+            "description": "最多返回几条，默认 10，上限 50"
+          }
+        }
+      }
+    },
+    "list_categories": {
+      "description": "列出 FunLink 的全部分类及各分类下的网址数量，用来决定新网址该收藏到哪个分类。",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false
+      }
+    },
+    "add_bookmark": {
+      "description": "把一个网址收藏到 FunLink。已经收藏过的网址不会重复添加，会直接返回现有的那张卡片。",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "要收藏的网址，不带协议时按 https 处理"
+          },
+          "title": {
+            "type": "string",
+            "description": "网站名称，留空时取网址的主机名"
+          },
+          "description": {
+            "type": "string",
+            "description": "一句话简介，留空时取网址的主机名"
+          },
+          "category": {
+            "type": "string",
+            "description": "分类名称或分类 id，留空收藏到收集箱；给了但不存在会报错"
+          }
+        },
+        "required": ["url"]
+      }
+    },
+    "open_bookmark": {
+      "description": "打开 FunLink 中已收藏的网址，按卡片设置用系统浏览器或内置浏览器打开。",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "卡片 id，由 search_bookmarks 返回"
+          },
+          "keyword": {
+            "type": "string",
+            "description": "没有 id 时按关键词定位，取最靠前的一条匹配"
+          },
+          "query": {
+            "type": "string",
+            "description": "搜索类网址（含 {q} 占位符）必须给出的搜索关键词"
+          }
+        }
+      }
+    }
+  }
 }

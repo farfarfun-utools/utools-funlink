@@ -21,9 +21,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 20 是 package.json engines 要求的下限，也是 uTools 8 内置的 Node 版本；
-        # 22 用来提前发现新版本上的问题。
-        node: [20, 22]
+        # 22 是测试工具链的硬下限：jsdom 30 依赖 undici 8，而 undici 8 直接用了
+        # Node 22.10 才有的 worker_threads.markAsUncloneable，在 Node 20 上所有
+        # jsdom 环境的测试文件一加载就炸。Node 20 本身也已于 2026-04 结束维护。
+        # 24 用来提前发现新版本上的问题。
+        node: [22, 24]
     steps:
       - uses: actions/checkout@v4
 
@@ -61,8 +63,10 @@ jobs:
           test -f utools/logo.png
           test -f utools/search.png
 
+      # 只在下限那个版本上传一份就够了。注意这个条件要跟着矩阵改：之前写的是
+      # node == 20，而 20 的 Test 一直在失败，产物实际上从来没传上去过。
       - name: Upload plugin artifact
-        if: matrix.node == 20
+        if: matrix.node == 22
         uses: actions/upload-artifact@v4
         with:
           name: utools-funlink-plugin

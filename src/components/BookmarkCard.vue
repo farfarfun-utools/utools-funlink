@@ -1,13 +1,15 @@
 <script setup lang="ts">
-import { computed } from 'vue'
 import { displayHost, initials, safeColor } from '../lib/core'
+import { useBookmarkIcon } from '../composables/useBookmarkIcon'
 import type { Bookmark } from '../lib/types'
 
 const props = withDefaults(defineProps<{ bookmark: Bookmark, trashView?: boolean }>(), { trashView: false })
 const emit = defineEmits(['open', 'note', 'context-menu', 'drag-start', 'drop'])
-// 只渲染存在本地的图（用户上传或添加时抓来的，都存成 data URL），
+// 只渲染存在本地的图（用户上传或添加时抓来的，存在数据库附件里，老数据还内联在卡片上），
 // 渲染时不发任何请求，更不经过第三方 favicon 服务。
-const iconImage = computed(() => (props.bookmark.iconType === 'image' ? props.bookmark.iconData : '') || '')
+// icon.pending 是「有图但附件还没读出来」：这期间留个空圆圈，不显示首字母——
+// 否则每次打开插件都能看到图标从首字母跳成图片。
+const icon = useBookmarkIcon(() => props.bookmark)
 </script>
 
 <template>
@@ -22,7 +24,7 @@ const iconImage = computed(() => (props.bookmark.iconType === 'image' ? props.bo
   >
     <span
       class="bookmark-icon"
-      :class="{ image: Boolean(iconImage) }"
+      :class="{ image: Boolean(icon.url) || icon.pending }"
       role="button"
       tabindex="0"
       :aria-label="`打开 ${bookmark.title} 的笔记`"
@@ -31,8 +33,8 @@ const iconImage = computed(() => (props.bookmark.iconType === 'image' ? props.bo
       @keydown.enter.stop="emit('note', bookmark)"
       @keydown.space.prevent.stop="emit('note', bookmark)"
     >
-      <img v-if="iconImage" :src="iconImage" alt="" />
-      <span v-else :class="{ 'emoji-text': bookmark.icon === '👌' }">{{ bookmark.icon || initials(bookmark.title) }}</span>
+      <img v-if="icon.url" :src="icon.url" alt="" />
+      <span v-else-if="!icon.pending" :class="{ 'emoji-text': bookmark.icon === '👌' }">{{ bookmark.icon || initials(bookmark.title) }}</span>
     </span>
     <!-- 整张卡片点哪儿都能打开，但 <article> 不可聚焦，键盘用户只能打开笔记（图标那颗）。
          标题这块本来就是「这张卡片是什么」的区域，让它兼任打开网址的可聚焦控件；

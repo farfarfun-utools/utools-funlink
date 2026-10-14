@@ -2,6 +2,7 @@
 import { nextTick, ref } from 'vue'
 import { initials, safeColor } from '../lib/core'
 import { sanitizeNoteHtml } from '../lib/sanitize'
+import { useBookmarkIcon } from '../composables/useBookmarkIcon'
 import type { Bookmark } from '../lib/types'
 
 const emit = defineEmits(['save'])
@@ -9,6 +10,8 @@ const dialog = ref<HTMLDialogElement | null>(null)
 const editor = ref<HTMLElement | null>(null)
 const bookmark = ref<Bookmark | null>(null)
 const original = ref('')
+// 图标存在数据库附件里，取法和卡片上完全一样（见 composables/useBookmarkIcon）。
+const icon = useBookmarkIcon(() => bookmark.value)
 
 function open(value: Bookmark) {
   bookmark.value = value
@@ -55,8 +58,8 @@ defineExpose({ open, close })
       <header class="note-dialog-header">
         <button type="button" class="note-card-title">
           <span class="note-avatar" :style="{ backgroundColor: safeColor(bookmark.color), fontSize: `${(bookmark.iconSize || 16) * 0.6}px` }">
-            <img v-if="bookmark.iconType === 'image' && bookmark.iconData" :src="bookmark.iconData" alt="" />
-            <template v-else>{{ bookmark.icon || initials(bookmark.title) }}</template>
+            <img v-if="icon.url" :src="icon.url" alt="" />
+            <template v-else-if="!icon.pending">{{ bookmark.icon || initials(bookmark.title) }}</template>
           </span>
           <span>{{ bookmark.title }}</span>
         </button>

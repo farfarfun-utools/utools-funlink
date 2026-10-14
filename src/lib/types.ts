@@ -19,7 +19,10 @@ export interface Bookmark {
   previousCategoryIds?: string[]
   iconType?: 'text' | 'image'
   icon?: string
+  /** 内联的图标 data URL。存得进附件时只留 iconRef，这个字段就不写了。 */
   iconData?: string
+  /** 图标附件的 ID，内容哈希（见 lib/iconStore.ts）。 */
+  iconRef?: string
   iconSize?: number
   color?: string
   browser?: BrowserMode

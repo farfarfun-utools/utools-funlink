@@ -47,6 +47,19 @@ export function isAbsoluteUrl(value: unknown): boolean {
   return /^(https?|ftp|file):\/\//i.test(String(value || '').trim())
 }
 
+/**
+ * 一张卡片要打开的全部网址：主网址加上附加网址，去掉空的和协议不安全的。
+ *
+ * urls 这个字段历史上存过两种形状——字符串数组，以及 { value } 对象数组
+ * （「网址精灵」的格式），两种都得认。
+ */
+export function urlsOf(bookmark: Bookmark): string[] {
+  const extras: unknown[] = Array.isArray(bookmark.urls) ? bookmark.urls : []
+  return [bookmark.url, ...extras.map((item: unknown) => (typeof item === 'string' ? item : (item as { value?: string })?.value))]
+    .map(url => String(url || '').trim())
+    .filter((url): url is string => Boolean(url) && isSafeUrl(url))
+}
+
 /** 判断书签是否匹配搜索词。 */
 export function bookmarkMatches(bookmark: Record<string, unknown>, keyword: unknown, fields: string[] = ['title', 'description', 'url']): boolean {
   const query = String(keyword || '').trim().toLocaleLowerCase()
@@ -95,7 +108,8 @@ export function migrateBookmark(bookmark: Record<string, unknown>): Bookmark {
 
   // 旧版把 iconType 默认设成 image 却从不写 iconData——图标是渲染时去第三方 favicon 服务现取的。
   // 现在图标一律存在本地（添加时抓一次），这类卡片回落成文字图标，否则会显示成空白圆圈。
-  if (next.iconType === 'image' && !next.iconData) next.iconType = 'text'
+  // iconRef 也算有图：图标存进附件之后卡片上只剩这个 ID（见 lib/iconStore.ts）。
+  if (next.iconType === 'image' && !next.iconData && !next.iconRef) next.iconType = 'text'
   return next
 }
 

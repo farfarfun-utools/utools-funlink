@@ -14,9 +14,12 @@ import type { Bookmark, Category } from './lib/types'
 
 const funlink = useFunLink()
 const {
-  state, toast, storageError, keywordPrompt, roots, activeCategoryId, activeRootId,
+  state, search, toast, storageError, keywordPrompt, roots, activeCategoryId, activeRootId,
   secondaryCategories, secondaryPosition, trashCount, currentBookmarks, defaultCategoryId,
 } = funlink
+// 换视图、换搜索词就是整批卡片换人，网格据此从第一批重新铺（见 BookmarkGrid）。
+// 删一张卡片之类的改动不会动到它，已经铺开的卡片也就不会缩回去。
+const gridViewKey = computed(() => `${state.value.currentView}|${search.value}`)
 // 子组件用 defineExpose 暴露 open/close，模板 ref 标上实例类型后这些方法才能被检查，
 // 写成 ref(null) 的话类型是 null，调用点全是 any。
 const bookmarkDialog = ref<InstanceType<typeof BookmarkDialog> | null>(null)
@@ -161,6 +164,7 @@ onBeforeUnmount(() => {
           />
           <BookmarkGrid
             :bookmarks="currentBookmarks"
+            :view-key="gridViewKey"
             :trash-view="state.currentView === 'trash'"
             :show-add="!['trash', 'quick', 'favorites'].includes(state.currentView)"
             @add="bookmarkDialog?.open()"

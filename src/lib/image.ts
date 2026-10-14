@@ -3,6 +3,8 @@
 // 四张就把整个文档写崩。所以存之前先按显示尺寸压一遍，让单张图标稳定在几 KB。
 
 import { initials, safeColor } from './core'
+import { dataUrlToBytes } from './dataurl'
+import { bookmarkIcon } from './iconStore'
 import type { Bookmark } from './types'
 
 // 图标最大边长。卡片上渲染为 42px，128px 已经覆盖 3 倍 HiDPI。
@@ -63,16 +65,8 @@ export async function toIconDataUrl(file: Blob, maxEdge: number = MAX_EDGE): Pro
 
 /** 把 data URL 解回 Blob。解析不出来返回 null（当成抓取失败处理）。 */
 export function dataUrlToBlob(dataUrl: string): Blob | null {
-  const matched = /^data:([^;,]+)(;base64)?,([\s\S]*)$/.exec(String(dataUrl || ''))
-  if (!matched) return null
-  const [, mime, base64, data] = matched
-  try {
-    if (!base64) return new Blob([decodeURIComponent(data ?? '')], { type: mime })
-    const binary = atob(data ?? '')
-    return new Blob([Uint8Array.from(binary, char => char.charCodeAt(0))], { type: mime })
-  } catch {
-    return null
-  }
+  const parts = dataUrlToBytes(dataUrl)
+  return parts ? new Blob([parts.bytes], { type: parts.mime }) : null
 }
 
 /**
@@ -137,8 +131,14 @@ export function textIconDataUrl(text: string, color: string): string {
   }
 }
 
-/** 卡片交给 uTools 用的图标：图片图标直接用，文字图标现画一张，都拿不到才回落插件 logo。 */
+/**
+ * 卡片交给 uTools 用的图标：图片图标直接用，文字图标现画一张，都拿不到才回落插件 logo。
+ *
+ * 图片图标存在附件里，这里只认已经读进内存的那份（见 lib/iconStore.ts 的 warmIcons）：
+ * 主搜索框每敲一个字都要重算一遍推送列表，这个函数必须是同步的，没法现去读附件。
+ */
 export function bookmarkIconUrl(bookmark: Bookmark): string {
-  if (bookmark.iconType === 'image' && bookmark.iconData) return bookmark.iconData
+  const image = bookmarkIcon(bookmark).url
+  if (image) return image
   return textIconDataUrl(bookmark.icon || initials(bookmark.title), safeColor(bookmark.color)) || 'logo.png'
 }

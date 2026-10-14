@@ -2,7 +2,7 @@ import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import {
   bookmarkMatches, createId, displayHost, isSafeUrl, migrateBookmark, migrateState, moveCategory,
-  moveItem, normalizeCategoryIds, normalizeUrl, safeColor, splitTitle, validateState,
+  moveItem, normalizeCategoryIds, normalizeUrl, safeColor, splitTitle, urlsOf, validateState,
 } from '../src/lib/core.ts'
 
 test('core bookmark operations stay predictable', () => {
@@ -107,4 +107,21 @@ test('safeColor 只放过颜色字面量，其余回退到默认色', () => {
   assert.equal(safeColor('rgba(1, 2, 3, 0.5)'), 'rgba(1, 2, 3, 0.5)')
   assert.equal(safeColor('red; background: url(javascript:alert(1))'), '#16b8c7')
   assert.equal(safeColor(undefined), '#16b8c7')
+})
+
+test('urlsOf 认两种附加网址格式，并挡掉不安全协议', () => {
+  // 字符串数组是现在写入的格式，{ value } 对象是「网址精灵」备份里的格式。
+  assert.deepEqual(urlsOf({ url: 'https://a.example', urls: ['https://b.example'] }),
+    ['https://a.example', 'https://b.example'])
+  assert.deepEqual(urlsOf({ url: 'https://a.example', urls: [{ value: 'https://b.example' }] }),
+    ['https://a.example', 'https://b.example'])
+
+  // 空串、空白和 javascript: 都不该跟着被打开。
+  assert.deepEqual(urlsOf({ url: 'https://a.example', urls: ['', '   ', 'javascript:alert(1)', { value: '' }] }),
+    ['https://a.example'])
+  // 主网址自己不安全时返回空列表，调用方据此什么都不做。
+  assert.deepEqual(urlsOf({ url: 'javascript:alert(1)' }), [])
+  assert.deepEqual(urlsOf({ url: '' }), [])
+  // urls 字段历史上可能根本不是数组。
+  assert.deepEqual(urlsOf({ url: 'https://a.example', urls: 'https://b.example' }), ['https://a.example'])
 })

@@ -2,6 +2,7 @@ import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { useFunLink } from '../src/composables/useFunLink.ts'
+import { cachedIcon, iconRefFor, resetIconStore } from '../src/lib/iconStore.ts'
 import { STORAGE_KEY } from '../src/lib/state.ts'
 
 // 每次都给一份干净的空白备份当「已保存数据」，避免 useFunLink() 在没有存档时
@@ -418,10 +419,10 @@ test('主搜索推送结果带的是卡片自己的图标', () => {
 const FETCHED_ICON = 'data:image/webp;base64,FETCHED'
 
 // 存量回填一次要写几十上百张图标，既要真的落盘，也要让快开入口跟着变。
-test('applyIcons 把抓来的图标写进卡片并落盘，快开入口的图标跟着换', () => {
+test('applyIcons 把抓来的图标写进卡片并落盘，快开入口的图标跟着换', async () => {
   const features = []
   let saved = null
-  withEnv({ utools: {
+  await withEnv({ utools: {
     dbStorage: {
       getItem: key => (key === STORAGE_KEY ? emptyBackup() : null),
       setItem: (key, value) => { saved = value },
@@ -439,12 +440,13 @@ test('applyIcons 把抓来的图标写进卡片并落盘，快开入口的图标
       return index >= 0
     },
     getFeatures: () => features.slice(),
-  } }, () => {
+  } }, async () => {
     const api = useFunLink()
     api.saveBookmark({ id: 'w1', title: '文档', url: 'https://doc.example.com/', quick: true })
     api.saveBookmark({ id: 'w2', title: '面板', url: 'https://panel.example.com/' })
 
-    const ok = api.applyIcons([{ id: 'w1', iconData: FETCHED_ICON }, { id: 'w2', iconData: FETCHED_ICON }])
+    // 没有 utools.db（这里的替身只有 dbStorage）时图标仍然内联在卡片上。
+    const ok = await api.applyIcons([{ id: 'w1', iconData: FETCHED_ICON }, { id: 'w2', iconData: FETCHED_ICON }])
 
     assert.equal(ok, true)
     assert.deepEqual(api.state.value.bookmarks.map(bookmark => [bookmark.iconType, bookmark.iconData]), [['image', FETCHED_ICON], ['image', FETCHED_ICON]])
@@ -452,20 +454,20 @@ test('applyIcons 把抓来的图标写进卡片并落盘，快开入口的图标
     assert.deepEqual(features.map(feature => feature.icon), [FETCHED_ICON], '快开入口的图标取自卡片，换了图标得重新注册一遍')
 
     saved = null
-    assert.equal(api.applyIcons([{ id: 'gone', iconData: FETCHED_ICON }]), true, '卡片已经被删掉的更新直接跳过')
+    assert.equal(await api.applyIcons([{ id: 'gone', iconData: FETCHED_ICON }]), true, '卡片已经被删掉的更新直接跳过')
     assert.equal(saved, null, '没有实际改动就不落盘')
   })
 })
 
-test('applyIcons 写不进存储时把这一批改回原样', () => {
+test('applyIcons 写不进存储时把这一批改回原样', async () => {
   const seeded = { ...emptyBackup(), bookmarks: [{ id: 'w1', title: '文档', url: 'https://doc.example.com/', iconType: 'text', icon: 'WD' }] }
-  withEnv({ utools: { dbStorage: {
+  await withEnv({ utools: { dbStorage: {
     getItem: key => (key === STORAGE_KEY ? seeded : null),
     setItem: () => { throw new Error('db is locked') },
-  } } }, () => {
+  } } }, async () => {
     const api = useFunLink()
 
-    const ok = api.applyIcons([{ id: 'w1', iconData: FETCHED_ICON }])
+    const ok = await api.applyIcons([{ id: 'w1', iconData: FETCHED_ICON }])
 
     assert.equal(ok, false)
     const bookmark = api.state.value.bookmarks[0]
@@ -474,6 +476,173 @@ test('applyIcons 写不进存储时把这一批改回原样', () => {
     assert.ok(!bookmark.iconData)
     assert.equal(api.toast.error, true)
   })
+})
+
+// 要存进附件就得先解成字节，所以这两串必须是合法 base64（长度不能是 4n+1）。
+const SHARED_ICON = 'data:image/webp;base64,SHARED'
+const OTHER_ICON = 'data:image/png;base64,OTHERPNG'
+
+/**
+ * uTools 附件接口的替身，细节见 iconStore.test.mjs。
+ * 这里只关心整库文档和附件之间的分工，所以实现得更短。
+ */
+function fakeIconDb() {
+  const attachments = new Map()
+  const posted = []
+  const removed = []
+  return {
+    attachments, posted, removed,
+    db: { promises: {
+      postAttachment: async (id, bytes, type) => {
+        posted.push(id)
+        if (attachments.has(id)) return { id, error: true, name: 'conflict' }
+        attachments.set(id, { bytes: Uint8Array.from(bytes), type })
+        return { id, ok: true }
+      },
+      getAttachment: async id => attachments.get(id)?.bytes ?? null,
+      getAttachmentType: async id => attachments.get(id)?.type ?? null,
+      allDocs: async prefix => [...attachments.keys()].filter(id => id.startsWith(prefix)).map(id => ({ _id: id })),
+      remove: async id => { removed.push(id); attachments.delete(id); return { id, ok: true } },
+      replicateStateFromCloud: async () => 0,
+    } },
+  }
+}
+
+// 迁移、预读、清理都是 setupUtools 里 void 掉的后台任务，没有句柄可等。
+// 这三步之间只有 await，没有定时器，所以一个宏任务之后必然都跑完了。
+const settle = () => new Promise(resolve => setTimeout(resolve, 0))
+
+// 图标原先整串 data URL 存在整库文档里，几十张图片图标就能把 1MB 的单文档顶满。
+test('启动时把内联图标挪进附件，同一张图只存一份', async () => {
+  resetIconStore()
+  const host = fakeIconDb()
+  const seeded = { ...emptyBackup(), bookmarks: [
+    { id: 'w1', title: '文档', url: 'https://doc.example.com/', iconType: 'image', iconData: SHARED_ICON },
+    { id: 'w2', title: '面板', url: 'https://panel.example.com/', iconType: 'image', iconData: SHARED_ICON },
+    { id: 'w3', title: '博客', url: 'https://blog.example.com/', iconType: 'image', iconData: OTHER_ICON },
+    { id: 'w4', title: '文字', url: 'https://text.example.com/', iconType: 'text', icon: 'WZ' },
+  ] }
+  let saved = null
+  await withEnv({ utools: {
+    dbStorage: { getItem: key => (key === STORAGE_KEY ? seeded : null), setItem: (key, value) => { saved = value } },
+    setExpandHeight: () => {},
+    ...host,
+  } }, async () => {
+    const api = useFunLink()
+    api.setupUtools({ addBookmark: () => {} })
+    await settle()
+
+    const bookmarks = api.state.value.bookmarks
+    // 同一个站点的 favicon、同一张上传的图：附件 ID 按内容算，两张卡片指向同一份。
+    assert.equal(bookmarks[0].iconRef, bookmarks[1].iconRef)
+    assert.equal(bookmarks[0].iconRef, iconRefFor(SHARED_ICON))
+    assert.deepEqual(host.posted, [iconRefFor(SHARED_ICON), iconRefFor(OTHER_ICON)], '第二张命中缓存，不会重复写一遍')
+    assert.equal(host.attachments.size, 2)
+    assert.deepEqual(host.removed, [], '刚挪进去的附件正被引用着，不能当成孤儿清掉')
+
+    assert.ok(bookmarks.every(bookmark => !bookmark.iconData), '挪进附件之后卡片上不再留 data URL')
+    assert.deepEqual(saved.bookmarks.map(bookmark => bookmark.iconRef), [iconRefFor(SHARED_ICON), iconRefFor(SHARED_ICON), iconRefFor(OTHER_ICON), undefined])
+    assert.ok(!JSON.stringify(saved).includes('SHARED'), '整库文档里只剩附件 ID，图标本身不再占那 1MB')
+    // 迁移完还得立刻能显示：预读已经把附件读回内存了。
+    assert.equal(cachedIcon(bookmarks[0].iconRef), SHARED_ICON)
+  })
+  resetIconStore()
+})
+
+test('编辑卡片时没换图标就沿用原来的附件，换了图才重新存一份', async () => {
+  resetIconStore()
+  const host = fakeIconDb()
+  const seeded = { ...emptyBackup(), bookmarks: [{ id: 'w1', title: '文档', url: 'https://doc.example.com/', iconType: 'image', iconData: SHARED_ICON }] }
+  await withEnv({ utools: {
+    dbStorage: { getItem: key => (key === STORAGE_KEY ? seeded : null), setItem: () => {} },
+    setExpandHeight: () => {},
+    ...host,
+  } }, async () => {
+    const api = useFunLink()
+    api.setupUtools({ addBookmark: () => {} })
+    await settle()
+    const bookmark = () => api.state.value.bookmarks[0]
+
+    // 对话框回传的始终是 data URL（预览、上传都要它），改标题时也会原样带回来。
+    api.saveBookmark({ id: 'w1', title: '文档中心', url: 'https://doc.example.com/', iconType: 'image', iconData: SHARED_ICON })
+    await settle()
+
+    assert.equal(bookmark().title, '文档中心')
+    assert.equal(bookmark().iconRef, iconRefFor(SHARED_ICON), '同一张图就继续用原来的附件 ID')
+    assert.ok(!bookmark().iconData)
+    assert.deepEqual(host.posted, [iconRefFor(SHARED_ICON)], '改个标题不该再写一遍图标')
+
+    api.saveBookmark({ id: 'w1', title: '文档中心', url: 'https://doc.example.com/', iconType: 'image', iconData: OTHER_ICON })
+    assert.equal(bookmark().iconData, OTHER_ICON, '保存是同步的，新图标先内联落盘')
+    assert.ok(!bookmark().iconRef, '旧 ID 指的是旧图，必须立刻丢掉')
+    await settle()
+
+    assert.equal(bookmark().iconRef, iconRefFor(OTHER_ICON), '随后由后台挪进附件')
+    assert.ok(!bookmark().iconData)
+
+    api.saveBookmark({ id: 'w1', title: '文档中心', url: 'https://doc.example.com/', iconType: 'text', icon: 'WD' })
+    assert.ok(!bookmark().iconRef, '改回文字图标就不该再挂着附件 ID')
+  })
+  resetIconStore()
+})
+
+test('applyIcons 在 uTools 里把图标存进附件，文档里只留 ID', async () => {
+  resetIconStore()
+  const host = fakeIconDb()
+  const features = []
+  let saved = null
+  await withEnv({ utools: {
+    dbStorage: { getItem: key => (key === STORAGE_KEY ? emptyBackup() : null), setItem: (key, value) => { saved = value } },
+    setFeature: feature => features.push(feature),
+    removeFeature: () => false,
+    getFeatures: () => features.slice(),
+    ...host,
+  } }, async () => {
+    const api = useFunLink()
+    api.saveBookmark({ id: 'w1', title: '文档', url: 'https://doc.example.com/', quick: true })
+    api.saveBookmark({ id: 'w2', title: '面板', url: 'https://panel.example.com/' })
+
+    const ok = await api.applyIcons([{ id: 'w1', iconData: FETCHED_ICON }, { id: 'w2', iconData: FETCHED_ICON }])
+
+    assert.equal(ok, true)
+    // 存量回填一次能抓几百张，内联进文档必撞上限，所以要先存附件再落盘。
+    assert.deepEqual(api.state.value.bookmarks.map(bookmark => bookmark.iconRef), [iconRefFor(FETCHED_ICON), iconRefFor(FETCHED_ICON)])
+    assert.ok(api.state.value.bookmarks.every(bookmark => !bookmark.iconData))
+    assert.ok(!JSON.stringify(saved).includes('FETCHED'))
+    assert.equal(host.attachments.size, 1)
+    assert.equal(features.at(-1).icon, FETCHED_ICON, '快开入口要的是真图，从刚存过的缓存里取')
+  })
+  resetIconStore()
+})
+
+// 备份文件要能单独换一台设备恢复，只带附件 ID 的话恢复出来是一堆空图标。
+test('导出备份时把附件里的图标还原成内联 data URL', async () => {
+  resetIconStore()
+  const host = fakeIconDb()
+  const seeded = { ...emptyBackup(), bookmarks: [{ id: 'w1', title: '文档', url: 'https://doc.example.com/', iconType: 'image', iconData: SHARED_ICON }] }
+  let savedContent = null
+  await withEnv({
+    confirm: () => true,
+    funlink: { saveBackup: content => { savedContent = content; return true } },
+    utools: {
+      dbStorage: { getItem: key => (key === STORAGE_KEY ? seeded : null), setItem: () => {} },
+      setExpandHeight: () => {},
+      ...host,
+    },
+  }, async () => {
+    const api = useFunLink()
+    api.setupUtools({ addBookmark: () => {} })
+    await settle()
+    assert.equal(api.state.value.bookmarks[0].iconRef, iconRefFor(SHARED_ICON), '先确认图标真的挪进了附件')
+
+    api.exportBackup()
+
+    const parsed = JSON.parse(savedContent)
+    assert.equal(parsed.bookmarks[0].iconData, SHARED_ICON)
+    assert.ok(!parsed.bookmarks[0].iconRef, '附件 ID 是这台设备数据库里的东西，带进备份没有意义')
+    assert.equal(api.state.value.bookmarks[0].iconRef, iconRefFor(SHARED_ICON), '导出不该把内存里的卡片改回内联')
+  })
+  resetIconStore()
 })
 
 // AI / MCP 调用走的是另一条路，不触发进入插件事件，所以工具必须在页面初始化时注册。

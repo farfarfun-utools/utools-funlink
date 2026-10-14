@@ -1,29 +1,25 @@
+// 整库状态的中枢：持有 state、负责落盘，并把界面要用的推导和操作拼在一起。
+// 打开卡片、整库进出、批量抓图标各自成一个 composable（见 useOpenLink /
+// useDataTransfer / useIconBackfill），这里只留状态本身和卡片、分类的增删改。
 import { computed, ref } from 'vue'
-import { IMPORT_COLORS, createId, displayHost, fillQueryPlaceholder, hasQueryPlaceholder, initials, isSafeUrl, moveCategory, moveItem, normalizeCategoryIds, originOf, parseBookmarkHtml, splitTitle } from '../lib/core'
-import { removeQuickFeature, resetQuickFeatures, syncQuickFeature } from '../lib/features'
-import { STORAGE_KEY, categoryIdsOf, loadState, prepareState } from '../lib/state'
-import { convertLegacyExport, isLegacyExport } from '../lib/legacy'
+import { createId, moveCategory, moveItem, normalizeCategoryIds } from '../lib/core'
+import { removeQuickFeature, syncQuickFeature } from '../lib/features'
+import { iconRefFor, storeIcon } from '../lib/iconStore'
+import { STORAGE_KEY, categoryIdsOf, loadState } from '../lib/state'
 import { commitStorage, readStorage, serializeForStorage } from '../lib/storage'
 import * as views from '../lib/views'
 import type { AppState, Bookmark, Category, CategoryAction } from '../lib/types'
 import type { IconUpdate } from '../lib/icons'
 import { registerAiTools } from './useAiTools'
+import { seedState, useDataTransfer } from './useDataTransfer'
+import { useIconAttachments } from './useIconAttachments'
 import { useIconBackfill } from './useIconBackfill'
 import { useKeywordPrompt } from './useKeywordPrompt'
+import { useOpenLink } from './useOpenLink'
 import { useToast } from './useToast'
 import { setupUtoolsHost } from './useUtoolsHost'
 
 export { PLUGIN_HEIGHT } from './useUtoolsHost'
-
-// 示例数据本身就是「网址精灵」的文档格式，直接复用导入用的转换器，
-// 免得示例数据和真实导入走两套映射、行为不一致。
-//
-// 用动态 import 而不是顶部静态 import：这份 JSON 有 84KB，压进主包要占四分之一的
-// 体积，但只有首次启动和「恢复示例数据」才读得到，老用户每次启动都白解析一遍。
-async function seedState(): Promise<AppState> {
-  const { default: firstData } = await import('../data/firstData.json')
-  return convertLegacyExport(firstData).state
-}
 
 /** 提供收藏状态、导入导出及 uTools 交互能力。 @returns {object} */
 export function useFunLink() {
@@ -64,6 +60,9 @@ export function useFunLink() {
     return result.ok
   }
 
+  // 图标存进数据库附件（整库文档里只留一个 ID），迁移和清理都在这里。
+  const { offloadIcons, syncIconAttachments } = useIconAttachments({ state, storageError, saveState })
+
   function setView(view: string) {
     if (view.startsWith('category:')) {
       const categoryId = view.slice(9)
@@ -88,12 +87,24 @@ export function useFunLink() {
       url: input.url ?? previous?.url ?? '',
       categoryId: categoryIds[0], categoryIds, note: previous?.note || '', deletedAt: null,
     }
+    // 图标存在数据库附件里，卡片上只留一个附件 ID。对话框回传的是 data URL
+    // （预览、上传都要它），这里按内容哈希比一下：和已存的是同一张就继续用原来的 ID，
+    // 换了图就先内联落盘，随后由 offloadIcons 挪进附件。
+    if (bookmark.iconType === 'image' && bookmark.iconData) {
+      if (iconRefFor(bookmark.iconData) === bookmark.iconRef) delete bookmark.iconData
+      else delete bookmark.iconRef
+    } else if (bookmark.iconType !== 'image') delete bookmark.iconRef
     if (previous) state.value.bookmarks[state.value.bookmarks.indexOf(previous)] = bookmark
     else if (afterId) state.value.bookmarks.splice(state.value.bookmarks.findIndex(item => item.id === afterId) + 1, 0, bookmark)
     else state.value.bookmarks.push(bookmark)
     syncQuickFeature(bookmark)
     const saved = saveState()
-    if (saved) showToast(previous ? '网址已更新' : '网址已添加')
+    if (saved) {
+      showToast(previous ? '网址已更新' : '网址已添加')
+      // 保存本身必须是同步的（AI 工具按返回值报成败），所以新图标先内联落盘，
+      // 挪进附件在后台接着做。
+      void offloadIcons()
+    }
     return saved
   }
 
@@ -109,22 +120,37 @@ export function useFunLink() {
    * 写失败就把这一批改回原样：内存和存储必须一致，否则后面每次保存都会
    * 带着这批图标再撞一次同样的上限。
    */
-  function applyIcons(updates: IconUpdate[]): boolean {
+  async function applyIcons(updates: IconUpdate[]): Promise<boolean> {
+    // 先存附件再落盘：这样整库文档里每张图标只多出一个 ID，图标本身不占那 1MB
+    // 的额度，几百张卡片一次抓完也不会把文档顶到上限。
+    const refs = new Map<string, string>()
+    for (const update of updates) {
+      const ref = update.iconData ? await storeIcon(update.iconData) : ''
+      if (ref) refs.set(update.id, ref)
+    }
     const changed = updates.flatMap(update => {
       const bookmark = state.value.bookmarks.find(item => item.id === update.id)
       if (!bookmark || !update.iconData) return []
-      const previous = { bookmark, iconType: bookmark.iconType, iconData: bookmark.iconData }
+      const previous = { bookmark, iconType: bookmark.iconType, iconData: bookmark.iconData, iconRef: bookmark.iconRef }
+      const ref = refs.get(update.id)
       bookmark.iconType = 'image'
-      bookmark.iconData = update.iconData
+      if (ref) {
+        bookmark.iconRef = ref
+        delete bookmark.iconData
+      } else {
+        // 存不进附件（不在 uTools 里、写入失败）就还是内联在卡片上。
+        bookmark.iconData = update.iconData
+        delete bookmark.iconRef
+      }
       // 快开入口的图标取自卡片，换了图标得重新注册一遍才会跟着变。
       if (bookmark.quick) syncQuickFeature(bookmark)
       return [previous]
     })
     if (!changed.length) return true
     if (saveState()) return true
-    changed.forEach(({ bookmark, iconType, iconData }) => {
-      bookmark.iconType = iconType
-      bookmark.iconData = iconData
+    changed.forEach(({ bookmark, ...icon }) => {
+      // 字段可能本来就没有，赋成 undefined 和没有这个字段在序列化时是一回事。
+      Object.assign(bookmark, icon)
       if (bookmark.quick) syncQuickFeature(bookmark)
     })
     return false
@@ -132,34 +158,7 @@ export function useFunLink() {
 
   const iconBackfill = useIconBackfill({ state, storageError, applyIcons, showToast })
 
-  function urlsOf(bookmark: Bookmark): string[] {
-    const extras: unknown[] = Array.isArray(bookmark.urls) ? bookmark.urls : []
-    return [bookmark.url, ...extras.map((item: unknown) => (typeof item === 'string' ? item : (item as { value?: string })?.value))]
-      .map(url => String(url || '').trim())
-      .filter((url): url is string => Boolean(url) && isSafeUrl(url))
-  }
-
-  function openUrl(bookmark: Bookmark, url: string) {
-    const followsDefault = !bookmark.browser || bookmark.browser === 'default'
-    const useInner = bookmark.browser === 'inner' || (followsDefault && state.value.settings.browser.isOpenIn)
-    if (useInner && window.utools?.ubrowser) {
-      window.utools.ubrowser.goto(url).run({ width: state.value.settings.browser.width, height: state.value.settings.browser.height })
-    } else if (window.funlink?.openExternal) {
-      // 'default' / 'system' 都表示交给系统默认浏览器。
-      window.funlink.openExternal(url, followsDefault || bookmark.browser === 'system' ? '' : bookmark.browser)
-    } else window.open(url, '_blank', 'noopener,noreferrer')
-  }
-
-  async function openLink(bookmark: Bookmark, query = '') {
-    const urls = urlsOf(bookmark)
-    if (!urls.length) return
-    let keyword = String(query || '').trim() || search.value.trim()
-    if (urls.some(hasQueryPlaceholder) && !keyword) {
-      keyword = await askKeyword(`在 ${bookmark.title} 中搜索`)
-      if (!keyword) return
-    }
-    urls.forEach(url => openUrl(bookmark, fillQueryPlaceholder(url, keyword)))
-  }
+  const { openLink, clearCookies } = useOpenLink({ state, search, askKeyword, showToast })
 
   function toggleFavorite(bookmark: Bookmark) {
     bookmark.favorite = !bookmark.favorite
@@ -272,117 +271,16 @@ export function useFunLink() {
     if (saveState()) showToast('设置已保存！')
   }
 
-  // 原来的实现是删 dbStorage 里 cookie@ 开头的文档——那是「网址精灵」留下的东西，
-  // FunLink 从不写，内置浏览器的 Cookie 也不存在那里，所以点了等于没点，还白报一句
-  // 「已清空」。真正的入口只有 ubrowser 链上的 clearCookies，它按 URL 清，
-  // 所以把库里所有网址的源过一遍。
-  async function clearCookies() {
-    const ubrowser = window.utools?.ubrowser
-    if (!ubrowser) return showToast('当前环境没有内置浏览器', true)
-    const origins = [...new Set(state.value.bookmarks.flatMap(urlsOf).map(originOf).filter(Boolean))]
-    if (!origins.length) return showToast('没有需要清理的 Cookies')
-    try {
-      // 不显示窗口：只是借 ubrowser 执行一遍清理队列。
-      await origins
-        .reduce((chain, origin) => chain.clearCookies(origin), ubrowser.goto('about:blank'))
-        .run({ show: false, width: 100, height: 100 })
-      showToast('内置浏览器 Cookies 已清空')
-    } catch (error) {
-      showToast(`清空 Cookies 失败：${error instanceof Error ? error.message : String(error)}`, true)
-    }
-  }
-
   function cycleTheme() {
     const order: AppState['theme'][] = ['system', 'light', 'dark']
     setTheme(order[(order.indexOf(state.value.theme) + 1) % order.length] ?? 'system')
     showToast({ system: '跟随系统主题', light: '已切换浅色主题', dark: '已切换深色主题' }[state.value.theme])
   }
 
-  function exportBackup() {
-    if (!window.confirm('导出内容为明文，可能包含网址、笔记和设置。确认备份到电脑？')) return
-    const content = JSON.stringify(state.value, null, 2)
-    if (window.funlink?.saveBackup?.(content)) return showToast('备份已导出')
-    const link = document.createElement('a')
-    link.href = URL.createObjectURL(new Blob([content], { type: 'application/json' }))
-    link.download = `funlink-${new Date().toISOString().slice(0, 10)}.json`
-    link.click()
-    URL.revokeObjectURL(link.href)
-    showToast('备份已导出')
-  }
-
-  function restoreBackup(content: string): boolean {
-    const parsed = JSON.parse(content)
-    // 既接受 FunLink 自己的备份，也接受「网址精灵」导出的 { db, flyDb } / 裸数组。
-    const source = isLegacyExport(parsed) ? convertLegacyExport(parsed).state : parsed
-    const { state: restored, dropped } = prepareState(source)
-    state.value = restored
-    // 恢复成功即说明拿到了可用数据，可以解除只读保护。
-    storageError.value = ''
-    // 备份体积超过单文档上限时写不进去，这时界面上是恢复好的、存储里还是旧数据，
-    // 必须按失败报出来，否则用户关掉插件才发现恢复没生效。
-    const saved = saveState()
-    applyTheme()
-    resetQuickFeatures(state.value.bookmarks)
-    if (saved) showToast(dropped ? `备份已恢复，已跳过 ${dropped} 条无效网址` : '备份已恢复')
-    return saved
-  }
-
-  function importBookmarks(content: string, options: { mode?: string, tabPosition?: Category['tabPosition'] }): boolean {
-    const imported = parseBookmarkHtml(content)
-    if (options.mode === 'replace') {
-      state.value.bookmarks.filter(bookmark => bookmark.quick).forEach(bookmark => removeQuickFeature(bookmark.id))
-      state.value.categories = []
-      state.value.bookmarks = []
-    }
-    const categoryId = createId('category-import')
-    state.value.categories.push({ id: categoryId, name: '导入书签', parentId: '', tabPosition: options.tabPosition || 'left' })
-    const existing = new Set(state.value.bookmarks.map(bookmark => bookmark.url))
-    const bookmarks: Bookmark[] = imported.filter(bookmark => !existing.has(bookmark.url)).map((bookmark, index): Bookmark => {
-      // 浏览器书签常写成「名称 - 简介」，按设置里的分隔符拆开。
-      const { title, description } = splitTitle(bookmark.title, state.value.settings.importSplit)
-      return {
-        ...bookmark,
-        id: createId('bookmark-import'),
-        title: title || bookmark.title,
-        description: description || displayHost(bookmark.url),
-        categoryId,
-        categoryIds: [categoryId],
-        color: IMPORT_COLORS[index % IMPORT_COLORS.length],
-        iconType: 'text',
-        icon: initials(title || bookmark.title),
-        urls: [],
-        browser: '', favorite: false, quick: false, note: '', deletedAt: null,
-      }
-    })
-    state.value.bookmarks.push(...bookmarks)
-    state.value.currentView = `category:${categoryId}`
-    const saved = saveState()
-    if (saved) showToast(`已导入 ${bookmarks.length} 个网址`)
-    return saved
-  }
-
-  /** 恢复备份或导入浏览器书签。两条路都可能拿到脏数据，异常统一在这里转成提示。 */
-  function processDataFile(type: 'restore' | 'import', content: string, options: { mode?: string, tabPosition?: Category['tabPosition'] } = {}): boolean {
-    try {
-      return type === 'restore' ? restoreBackup(content) : importBookmarks(content, options)
-    } catch (error) {
-      showToast((error as Error).message, true)
-      return false
-    }
-  }
-
-  async function resetData() {
-    if (!window.confirm('恢复示例数据？当前数据会被覆盖。')) return false
-    state.value.bookmarks.filter(bookmark => bookmark.quick).forEach(bookmark => removeQuickFeature(bookmark.id))
-    state.value = await seedState()
-    // 用户明确选择了覆盖，此时解除只读保护。
-    storageError.value = ''
-    const saved = saveState()
-    applyTheme()
-    resetQuickFeatures(state.value.bookmarks)
-    if (saved) showToast('已恢复示例数据')
-    return saved
-  }
+  const { exportBackup, processDataFile, resetData } = useDataTransfer({
+    state, storageError, saveState, showToast, applyTheme,
+    syncIcons: () => { void syncIconAttachments() },
+  })
 
   function setupUtools({ addBookmark }: { addBookmark: (input: Partial<Bookmark>) => void }) {
     setupUtoolsHost({
@@ -396,6 +294,9 @@ export function useFunLink() {
     // 和宿主事件一起注册，都在页面初始化阶段：AI / MCP 调用不会触发进入插件事件，
     // 注册代码要是挂在那上面就永远不会执行。
     registerAiTools({ state, saveBookmark, openLink })
+    // 图标的迁移、预读、清理都要读写数据库，放在这里一并启动：
+    // 首屏已经渲染出来了，这一轮在后台跑，图标读到哪张哪张就显示出来。
+    void syncIconAttachments()
   }
 
   applyTheme()

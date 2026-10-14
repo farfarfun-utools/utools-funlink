@@ -102,6 +102,29 @@ test('fetchIcon 跳过超过体积上限的图，不把几 MB 的图塞进存储
   })
 })
 
+test('fetchIcon 读到 HTML 上限就截断，截断的那半页仍然照常解析', async () => {
+  const requested = []
+  await withServer((req, res) => {
+    requested.push(req.url)
+    // 客户端读满 256KB 就会把响应掐掉，服务端这边的写入随后会撞到断开的连接；
+    // 这是预期行为，不该让测试里的 http server 抛出来。
+    res.on('error', () => {})
+    req.on('error', () => {})
+    if (req.url === '/') {
+      res.writeHead(200, { 'Content-Type': 'text/html' })
+      // 图标声明在 <head> 里，后面垫上远超上限的内容。
+      return res.end(`<html><head><link rel="icon" href="/icon.png"></head><body>${'x'.repeat(400 * 1024)}</body></html>`)
+    }
+    res.writeHead(200, { 'Content-Type': 'image/png' })
+    res.end(PNG)
+  }, async base => {
+    assert.equal(await funlink.fetchIcon(`${base}/`), `data:image/png;base64,${PNG.toString('base64')}`)
+    // 掐断连接会让请求随后冒一个 aborted 错误。要是让它盖掉已经读到的内容，
+    // 这里就只剩 /favicon.ico 兜底了，拿不到 /icon.png。
+    assert.deepEqual(requested, ['/', '/icon.png'])
+  })
+})
+
 test('fetchIcon 在页面打不开时仍然试一次 /favicon.ico', async () => {
   await withServer((req, res) => {
     if (req.url === '/favicon.ico') {

@@ -1,6 +1,6 @@
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { ICON_RESERVE_BYTES, iconBackfillCandidates, iconBudget, iconCost, runIconBackfill } from '../src/lib/icons.ts'
+import { ICON_REF_COST, ICON_RESERVE_BYTES, iconBackfillCandidates, iconBudget, iconCost, runIconBackfill } from '../src/lib/icons.ts'
 import { MAX_DOC_BYTES } from '../src/lib/storage.ts'
 
 const ICON = 'data:image/webp;base64,FETCHED'
@@ -46,6 +46,16 @@ test('重新抓一遍时带上现有图标的体积，净增量才算准', () =>
 
   assert.deepEqual(iconBackfillCandidates(bookmarks, { includeExisting: true }).map(target => target.existingBytes), [iconCost(ICON)])
   assert.deepEqual(iconBackfillCandidates(bookmarks).map(target => target.id), [])
+})
+
+// 图标挪进附件之后卡片上只剩一个 ID。漏看这个字段的话，一轮回填会把整库
+// 已经有图标的卡片全当成「还没有」，再白抓一遍。
+test('图标存进附件的卡片也算已经有图标了', () => {
+  const bookmarks = [{ id: 'web_1', title: '有图了', url: 'https://a.example.com/', iconType: 'image', iconRef: 'icon@abc-d' }]
+
+  assert.deepEqual(iconBackfillCandidates(bookmarks).map(target => target.id), [])
+  // 重抓时的净增量按文档里的占用算：这张卡片的图在附件里，文档里的那个 ID 可以忽略。
+  assert.deepEqual(iconBackfillCandidates(bookmarks, { includeExisting: true }).map(target => target.existingBytes), [0])
 })
 
 test('预算是上限减去已用和预留，已经写满时是 0', () => {
@@ -114,6 +124,38 @@ test('额度用完就停下，已经抓到的照样落盘', async () => {
   assert.equal(result.stoppedBy, 'budget')
   assert.equal(result.filled, 2)
   assert.deepEqual(store.applied, ['web_0', 'web_1'])
+})
+
+// 图标存进附件时，文档里每张只多一个 ID。还按一张图几 KB 记账的话，
+// 剩余额度看着满满的也会在第二张就喊「空间不够」。
+test('记账的单价可以换成一张图一个 ID 的开销', async () => {
+  // 一张 3KB 的真实图标，五张 ID 一共才 320 字节。
+  const BIG_ICON = `data:image/webp;base64,${'A'.repeat(4000)}`
+  const budget = ICON_REF_COST * 5 + 10
+  const run = extra => runIconBackfill({
+    candidates: targets(5),
+    budget,
+    fetch: async () => BIG_ICON,
+    concurrency: 1,
+    batchSize: 10,
+    ...extra,
+  })
+
+  const inline = recorder()
+  assert.equal((await run({ apply: inline.apply })).stoppedBy, 'budget', '内联在文档里的话这点额度连一张都放不下')
+  assert.deepEqual(inline.applied, [])
+
+  const applied = []
+  const attached = recorder()
+  const result = await run({
+    // 落盘要先把图标写进附件，是异步的，runIconBackfill 必须等它。
+    apply: async updates => { await Promise.resolve(); applied.push(...updates.map(update => update.id)); return attached.apply(updates) },
+    cost: () => ICON_REF_COST,
+  })
+
+  assert.equal(result.stoppedBy, 'done')
+  assert.equal(result.filled, 5)
+  assert.deepEqual(applied.sort(), ['web_0', 'web_1', 'web_2', 'web_3', 'web_4'])
 })
 
 test('重新抓一遍时按新旧之差记账，额度不会被白占掉', async () => {

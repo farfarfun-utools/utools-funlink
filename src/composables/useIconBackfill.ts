@@ -2,7 +2,8 @@
 // no-duplicate-imports 只按模块路径看，分成两条会被判成重复导入。
 import { computed, reactive, ref, type Ref } from 'vue'
 import { fetchSiteIcon } from '../lib/image'
-import { ICON_COST_ESTIMATE, iconBackfillCandidates, iconBudget, runIconBackfill, type IconFailure, type IconUpdate } from '../lib/icons'
+import { ICON_COST_ESTIMATE, ICON_REF_COST, iconBackfillCandidates, iconBudget, iconCost, runIconBackfill, type IconFailure, type IconUpdate } from '../lib/icons'
+import { iconStoreAvailable } from '../lib/iconStore'
 import { serializeForStorage } from '../lib/storage'
 import type { AppState } from '../lib/types'
 
@@ -11,7 +12,7 @@ export interface IconBackfillDeps {
   /** 存档异常时整库是只读的，这一轮不能跑。 */
   storageError: Ref<string>
   /** 把一批图标写进卡片并落盘，返回是否写成功。 */
-  applyIcons: (updates: IconUpdate[]) => boolean
+  applyIcons: (updates: IconUpdate[]) => boolean | Promise<boolean>
   showToast: (message: string, error?: boolean) => void
   /** 抓单张图标，测试里换成假实现。 */
   fetchIcon?: (url: string) => Promise<string>
@@ -46,7 +47,11 @@ export function useIconBackfill({ state, storageError, applyIcons, showToast, fe
   // 打开着的时候每落盘一批都会自动重算，估算误差不会一路累积下去。
   const storageBytes = computed(() => serializeForStorage(state.value).bytes)
   const remainingBytes = computed(() => iconBudget(storageBytes.value))
-  const capacity = computed(() => Math.floor(remainingBytes.value / ICON_COST_ESTIMATE))
+  // 图标存进附件之后在整库文档里只剩一个 ID，一张几十字节，这时「还能存多少张」
+  // 就不再由存档体积说话了（见 lib/iconStore.ts）。存不进附件（浏览器预览）时
+  // 图标仍然内联在文档里，按一张几 KB 估。
+  const perIconBytes = () => iconStoreAvailable() ? ICON_REF_COST : ICON_COST_ESTIMATE
+  const capacity = computed(() => Math.floor(remainingBytes.value / perIconBytes()))
   const percent = computed(() => total.value ? Math.min(100, Math.round(done.value / total.value * 100)) : 0)
 
   /** 一句话状态：对话框里和 toast 各写一份。 */
@@ -83,6 +88,7 @@ export function useIconBackfill({ state, storageError, applyIcons, showToast, fe
         budget: remainingBytes.value,
         fetch: fetchIcon,
         apply: applyIcons,
+        cost: iconStoreAvailable() ? () => ICON_REF_COST : iconCost,
         stopped,
         onProgress: progress => {
           if (id !== runId) return

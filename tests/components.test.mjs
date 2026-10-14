@@ -9,7 +9,11 @@ import BookmarkGrid from '../src/components/BookmarkGrid.vue'
 import ContextMenu from '../src/components/ContextMenu.vue'
 import KeywordDialog from '../src/components/KeywordDialog.vue'
 import SecondaryNavigation from '../src/components/SecondaryNavigation.vue'
+import { dataUrlToBytes } from '../src/lib/dataurl.ts'
+import { iconRefFor, loadIcon, resetIconStore } from '../src/lib/iconStore.ts'
 import { nextTick } from 'vue'
+
+const PNG_ICON = 'data:image/png;base64,iVBORw0KGgo='
 
 const ROOTS = [
   { id: 'cat_1', name: '工作', parentId: '' },
@@ -65,6 +69,33 @@ test('卡片图标只用本地图片，image 类型缺数据时回退成文字',
   assert.equal(wrapper.find('.bookmark-icon span').text(), 'HW')
 })
 
+// 图标存进数据库附件之后，卡片上只剩一个 ID，图得异步读出来。
+test('附件图标还在读的时候留个空圈，读到了再换上图片', async () => {
+  resetIconStore()
+  const ref = iconRefFor(PNG_ICON)
+  window.utools = { db: { promises: {
+    getAttachment: async () => dataUrlToBytes(PNG_ICON).bytes,
+    getAttachmentType: async () => 'image/png',
+  } } }
+  try {
+    const wrapper = mount(BookmarkCard, { props: { bookmark: { id: 'web_1', title: 'Hello World', url: 'https://example.com', iconType: 'image', iconRef: ref } } })
+    const box = wrapper.find('.bookmark-icon')
+
+    // 这会儿显示首字母的话，每次打开插件都能看见图标从 HW 跳成图片。
+    assert.equal(box.find('img').exists(), false)
+    assert.equal(box.find('span').exists(), false)
+    assert.ok(box.classes('image'), '位置先按图片留出来，免得读到图之后卡片抖一下')
+
+    await loadIcon(ref)
+    await nextTick()
+
+    assert.equal(wrapper.find('.bookmark-icon img').attributes('src'), PNG_ICON)
+  } finally {
+    delete window.utools
+    resetIconStore()
+  }
+})
+
 test('点图标打开笔记，点卡片其他区域打开网址', async () => {
   const bookmark = { id: 'web_1', title: '示例', url: 'https://example.com' }
   const wrapper = mount(BookmarkCard, { props: { bookmark } })
@@ -117,6 +148,53 @@ test('showAdd 为假时不渲染添加按钮', () => {
   const wrapper = mount(BookmarkGrid, { props: { bookmarks: [], showAdd: false } })
 
   assert.equal(wrapper.find('.add-item').exists(), false)
+})
+
+function manyBookmarks(count) {
+  return Array.from({ length: count }, (unused, index) => ({ id: `web_${index}`, title: `卡片 ${index}`, url: `https://example-${index}.com` }))
+}
+
+/** 等到卡片数量不再增长，最多等 50 帧，免得逻辑出错时把测试挂住。 */
+async function settleFrames(wrapper) {
+  for (let round = 0; round < 50; round += 1) {
+    const before = wrapper.findAll('.bookmark-card').length
+    await new Promise(resolve => requestAnimationFrame(resolve))
+    await nextTick()
+    if (wrapper.findAll('.bookmark-card').length === before) return
+  }
+}
+
+test('卡片很多时先铺第一批，其余按帧补齐', async () => {
+  const wrapper = mount(BookmarkGrid, { props: { bookmarks: manyBookmarks(300), viewKey: 'all|' } })
+
+  // 第一帧里不该把三百张全挂上去，那一帧的点击和滚动都会没反应。
+  assert.equal(wrapper.findAll('.bookmark-card').length, 120)
+  await settleFrames(wrapper)
+  // 补完之后是全量，不是虚拟滚动：页内查找、拖拽排序都还需要卡片真的在 DOM 里。
+  assert.equal(wrapper.findAll('.bookmark-card').length, 300)
+})
+
+test('删一张卡片不会把已经铺开的卡片缩回第一批', async () => {
+  const bookmarks = manyBookmarks(300)
+  const wrapper = mount(BookmarkGrid, { props: { bookmarks, viewKey: 'all|' } })
+  await settleFrames(wrapper)
+
+  await wrapper.setProps({ bookmarks: bookmarks.slice(1) })
+
+  // 缩回第一批的话页面高度会塌下去，用户的滚动位置被浏览器拽回顶部。
+  assert.equal(wrapper.findAll('.bookmark-card').length, 299)
+})
+
+test('换视图后重新从第一批铺起', async () => {
+  const wrapper = mount(BookmarkGrid, { props: { bookmarks: manyBookmarks(300), viewKey: 'all|' } })
+  await settleFrames(wrapper)
+
+  // 新视图的卡片数量和上一个一样，所以这里只能靠 viewKey 判断换批了。
+  await wrapper.setProps({ bookmarks: manyBookmarks(300), viewKey: 'category:cat_1|' })
+
+  assert.equal(wrapper.findAll('.bookmark-card').length, 120)
+  await settleFrames(wrapper)
+  assert.equal(wrapper.findAll('.bookmark-card').length, 300)
 })
 
 test('右键菜单渲染分隔线并回传 action', async () => {

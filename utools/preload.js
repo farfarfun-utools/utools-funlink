@@ -75,22 +75,30 @@ function requestError(context, error) {
  */
 function request(url, { method = 'GET', headers = {}, body = '', timeout = 10000, redirects = 3, allowedOrigin, binary = false, maxBytes = 0 } = {}) {
   return new Promise((resolve, reject) => {
+    // 结算只认第一次。超限这条路上一次请求会被结算两回：先 destroy 再给结果，而
+    // destroy 掉的请求随后还会冒一个 aborted 错误走到下面的 req.on('error')。
+    // Promise 本身会忽略第二次，但那样就只能靠「反正忽略」兜着，行为也不好读；
+    // 显式拦住之后，截断的文本仍然算成功，不会被 aborted 盖成失败。
+    let settled = false
+    const done = value => { if (!settled) { settled = true; resolve(value) } }
+    const fail = error => { if (!settled) { settled = true; reject(error) } }
+
     let target
     try {
       target = new URL(url)
     } catch (error) {
-      return reject(requestError(`${method} 无效地址`, error))
+      return fail(requestError(`${method} 无效地址`, error))
     }
-    if (allowedOrigin && target.origin !== allowedOrigin) return reject(new Error(`${method} WebDAV 地址必须与配置服务器同源`))
+    if (allowedOrigin && target.origin !== allowedOrigin) return fail(new Error(`${method} WebDAV 地址必须与配置服务器同源`))
     const context = requestContext(method, target)
     const client = target.protocol === 'https:' ? https : http
     const req = client.request(target, { method, headers }, response => {
       if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location && redirects) {
         response.resume()
         try {
-          return resolve(request(new URL(response.headers.location, target).href, { method, headers, body, timeout, redirects: redirects - 1, allowedOrigin, binary, maxBytes }))
+          return done(request(new URL(response.headers.location, target).href, { method, headers, body, timeout, redirects: redirects - 1, allowedOrigin, binary, maxBytes }))
         } catch (error) {
-          return reject(requestError(context, error))
+          return fail(requestError(context, error))
         }
       }
       const chunks = []
@@ -98,21 +106,23 @@ function request(url, { method = 'GET', headers = {}, body = '', timeout = 10000
       const finish = () => {
         const payload = Buffer.concat(chunks)
         if (response.statusCode >= 200 && response.statusCode < 300 || method === 'MKCOL' && response.statusCode === 405) {
-          resolve({ status: response.statusCode, url: target.href, headers: response.headers, body: binary ? payload : payload.toString('utf8') })
-        } else reject(new Error(`${context}: ${response.statusCode} ${response.statusMessage || '请求失败'}`))
+          done({ status: response.statusCode, url: target.href, headers: response.headers, body: binary ? payload : payload.toString('utf8') })
+        } else fail(new Error(`${context}: ${response.statusCode} ${response.statusMessage || '请求失败'}`))
       }
       response.on('data', chunk => {
+        // destroy 之后缓冲区里排着的 chunk 还会送过来，结算完就别再拼了。
+        if (settled) return
         chunks.push(chunk)
         received += chunk.length
         if (!maxBytes || received <= maxBytes) return
         response.destroy()
-        if (binary) reject(new Error(`${context}: 响应超过 ${Math.round(maxBytes / 1024)}KB 上限`))
+        if (binary) fail(new Error(`${context}: 响应超过 ${Math.round(maxBytes / 1024)}KB 上限`))
         else finish()
       })
       response.on('end', finish)
     })
     req.setTimeout(timeout, () => req.destroy(new Error(`${timeout / 1000}秒超时`)))
-    req.on('error', error => reject(requestError(context, error)))
+    req.on('error', error => fail(requestError(context, error)))
     if (body) req.write(body)
     req.end()
   })
@@ -138,8 +148,22 @@ const ICON_TARGET_EDGE = 128
 
 const LINK_TAG = /<link\b[^>]*>/gi
 
+// 取属性的正则按属性名缓存：名字只有 rel / href / sizes 这几个固定值，
+// 但每个 <link> 标签都要取三次，不缓存就是一个页面编译几十条一模一样的正则。
+// 没有 g 标志，所以同一条正则反复用不会带着 lastIndex 串进下一次匹配。
+const ATTRIBUTE_PATTERNS = new Map()
+
+function attributePattern(name) {
+  let pattern = ATTRIBUTE_PATTERNS.get(name)
+  if (!pattern) {
+    pattern = new RegExp(`\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s"'>]+))`, 'i')
+    ATTRIBUTE_PATTERNS.set(name, pattern)
+  }
+  return pattern
+}
+
 function attribute(tag, name) {
-  const matched = tag.match(new RegExp(`\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s"'>]+))`, 'i'))
+  const matched = tag.match(attributePattern(name))
   return matched ? (matched[1] ?? matched[2] ?? matched[3] ?? '').trim() : ''
 }
 
@@ -183,6 +207,11 @@ function iconCandidates(html, pageUrl) {
   return [...new Map(found.map(item => [item.url, item])).values()].slice(0, 4)
 }
 
+// 文件头常量放模块级：每次识别都 Buffer.from 一遍是白分配，而且这几个字节是常量。
+const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+const JPEG_MAGIC = Buffer.from([0xff, 0xd8, 0xff])
+const ICO_MAGIC = Buffer.from([0x00, 0x00, 0x01, 0x00])
+
 /**
  * 按文件头认图片类型。
  * 不信 Content-Type：很多站点给 /favicon.ico 返回的是带 200 状态码的 HTML 404 页面，
@@ -191,11 +220,11 @@ function iconCandidates(html, pageUrl) {
 function imageMime(buffer) {
   const head = buffer.subarray(0, 16)
   const ascii = offset => head.subarray(offset, offset + 4).toString('ascii')
-  if (head.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return 'image/png'
-  if (head.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff]))) return 'image/jpeg'
+  if (head.subarray(0, 8).equals(PNG_MAGIC)) return 'image/png'
+  if (head.subarray(0, 3).equals(JPEG_MAGIC)) return 'image/jpeg'
   if (ascii(0) === 'RIFF' && ascii(8) === 'WEBP') return 'image/webp'
   if (head.subarray(0, 3).toString('ascii') === 'GIF') return 'image/gif'
-  if (head.subarray(0, 4).equals(Buffer.from([0x00, 0x00, 0x01, 0x00]))) return 'image/x-icon'
+  if (head.subarray(0, 4).equals(ICO_MAGIC)) return 'image/x-icon'
   // svg 是文本，没有魔数，只能看开头是不是真的 svg 标签。
   const text = buffer.subarray(0, 512).toString('utf8').trimStart().toLowerCase()
   if ((text.startsWith('<?xml') || text.startsWith('<svg')) && text.includes('<svg')) return 'image/svg+xml'

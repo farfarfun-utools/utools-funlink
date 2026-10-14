@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { initials, isAbsoluteUrl, isHttpUrl, normalizeUrl, safeColor } from '../lib/core'
+import { bookmarkIcon, loadIcon } from '../lib/iconStore'
 import { fetchSiteIcon, toIconDataUrl } from '../lib/image'
 import { childrenOf as childrenIn, rootCategories } from '../lib/views'
 import type { BrowserMode, Bookmark, Category } from '../lib/types'
@@ -94,6 +95,18 @@ function open(bookmark: Partial<Bookmark> | null = null, insertAfterId: string |
     ? rawUrls.map(item => typeof item === 'string' ? item : String((item as { value?: unknown })?.value ?? ''))
     : []
   form.color = safeColor(form.color)
+  // 图片图标存在数据库附件里，卡片上只有一个 ID（见 lib/iconStore.ts），
+  // 而表单要的是能直接预览、提交时能原样回传的 data URL。
+  // 文字图标的卡片沿用自己那份 iconData：用户切回「图片」时原来选的图还在。
+  const icon = bookmark ? bookmarkIcon(bookmark as Bookmark) : { url: '', pending: false }
+  form.iconData = icon.url || String(bookmark?.iconData || '')
+  // 附件还没读出来（刚启动，预读还没走到这张）就现读一次，读到了再填进表单。
+  if (icon.pending) {
+    const editingId = bookmark?.id
+    loadIcon(String(bookmark?.iconRef || '')).then(url => {
+      if (url && form.id === editingId && !form.iconData) form.iconData = url
+    })
+  }
   expanded.value = editing.value || isAbsoluteUrl(form.url)
   // 编辑已有卡片时把当前网址记成「已处理」：点开弹窗不该把人家原来的图标换掉。
   // 新建时不记，这样从主搜索框带着网址进来的那条路也会自动抓。

@@ -16,6 +16,12 @@ export const ICON_RESERVE_BYTES = 64 * 1024
 /** 一张抓来的图标的典型占用，只用于给用户估「还能存多少张」。 */
 export const ICON_COST_ESTIMATE = 3 * 1024
 
+/**
+ * 图标挪进附件后在整库文档里的占用：只剩一个附件 ID 加字段名。
+ * 图标本身不再算进文档的 1MB 额度，所以这一轮能抓多少张几乎不受存档体积限制。
+ */
+export const ICON_REF_COST = 64
+
 const CONCURRENCY = 4
 const BATCH_SIZE = 10
 
@@ -60,8 +66,13 @@ export interface IconBackfillOptions {
   budget: number
   /** 抓一张图标，抓不到返回空串。 */
   fetch: (url: string) => Promise<string>
-  /** 把一批图标写进卡片并落盘，返回是否写成功。 */
-  apply: (updates: IconUpdate[]) => boolean
+  /**
+   * 把一批图标写进卡片并落盘，返回是否写成功。
+   * 允许返回 Promise：图标要先存进附件（异步）再落盘，见 composables/useFunLink 的 applyIcons。
+   */
+  apply: (updates: IconUpdate[]) => boolean | Promise<boolean>
+  /** 一张图标写进存档后多占的字节数。图标存成附件时只占一个 ID，默认按内联算。 */
+  cost?: (dataUrl: string) => number
   /** 返回 true 表示用户已经点了停止。 */
   stopped?: () => boolean
   onProgress?: (progress: IconBackfillProgress) => void
@@ -98,8 +109,11 @@ export function iconBackfillCandidates(bookmarks: Bookmark[], { includeExisting 
     const url = String(bookmark.url || '').trim()
     // 只抓 http(s)：file / ftp 没有网页图标可读。
     if (!isHttpUrl(url)) return []
+    // 已经有图标的判断要连 iconRef 一起看：图标挪进附件之后卡片上只剩这个 ID，
+    // 只看 iconData 的话每张卡片都会被当成「还没有图标」，整库白抓一遍。
+    const existing = bookmark.iconType === 'image' ? Boolean(bookmark.iconRef) || Boolean(bookmark.iconData) : false
     const iconData = bookmark.iconType === 'image' ? String(bookmark.iconData || '') : ''
-    if (iconData && !includeExisting) return []
+    if (existing && !includeExisting) return []
     return [{
       id: bookmark.id,
       title: bookmark.title,
@@ -119,7 +133,7 @@ export function iconBackfillCandidates(bookmarks: Bookmark[], { includeExisting 
  * 已经抓到的也该留住，不然用户只能从头再来一遍。
  */
 export async function runIconBackfill({
-  candidates, budget, fetch, apply,
+  candidates, budget, fetch, apply, cost = iconCost,
   stopped = () => false, onProgress,
   concurrency = CONCURRENCY, batchSize = BATCH_SIZE,
 }: IconBackfillOptions): Promise<IconBackfillResult> {
@@ -143,10 +157,10 @@ export async function runIconBackfill({
     return request
   }
 
-  function flush(): boolean {
+  async function flush(): Promise<boolean> {
     if (!pending.length) return true
     const batch = pending.splice(0, pending.length)
-    if (apply(batch)) {
+    if (await apply(batch)) {
       committed += batch.length
       return true
     }
@@ -175,14 +189,14 @@ export async function runIconBackfill({
         if (!icon) failed('没找到图标')
         else {
           // 重抓已有图标的卡片时，真正多占的只有新旧之差。
-          const cost = Math.max(0, iconCost(icon) - target.existingBytes)
-          if (cost > remaining) {
+          const bytes = Math.max(0, cost(icon) - target.existingBytes)
+          if (bytes > remaining) {
             halted = 'budget'
             return
           }
-          remaining -= cost
+          remaining -= bytes
           pending.push({ id: target.id, iconData: icon })
-          if (pending.length >= batchSize && !flush()) return
+          if (pending.length >= batchSize && !(await flush())) return
         }
       } catch (caught) {
         failed(caught instanceof Error ? caught.message : String(caught))
@@ -194,6 +208,6 @@ export async function runIconBackfill({
 
   await Promise.all(Array.from({ length: Math.min(concurrency, queue.length) }, worker))
   // 跑到头、被停下、撞上额度，都要把攒着的这一批落盘——重来一次又是一轮网络请求。
-  flush()
+  await flush()
   return { filled: committed, failures, stoppedBy: halted || 'done' }
 }

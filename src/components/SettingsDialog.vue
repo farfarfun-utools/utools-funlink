@@ -12,6 +12,7 @@ import emptyDarkImage from '../assets/empty-dark.svg'
 import type { IconBackfill } from '../composables/useIconBackfill'
 import { useLinkCheck } from '../composables/useLinkCheck'
 import { useWebdav } from '../composables/useWebdav'
+import { withInlineIcons } from '../lib/iconStore'
 import type { WebDavFile } from '../lib/webdav'
 import type { AppState, Bookmark, Settings } from '../lib/types'
 
@@ -51,7 +52,9 @@ const {
   backup: backupWebdav, loadFiles: loadWebdavFiles, restore: restoreFile, remove: deleteWebdav,
 } = useWebdav({
   onMessage: report,
-  backupContent: () => JSON.stringify(props.backupData, null, 2),
+  // 图标还原成内联 data URL：卡片上存的是本机数据库里的附件 ID，
+  // 只带 ID 的备份换一台设备恢复出来就是一堆空图标。
+  backupContent: () => JSON.stringify(props.backupData && withInlineIcons(props.backupData), null, 2),
   onRestore: content => emit('data-file', 'restore', content),
 })
 

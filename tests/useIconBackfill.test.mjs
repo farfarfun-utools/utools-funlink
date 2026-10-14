@@ -2,12 +2,13 @@ import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { ref } from 'vue'
 import { useIconBackfill } from '../src/composables/useIconBackfill.ts'
+import { ICON_COST_ESTIMATE, ICON_REF_COST } from '../src/lib/icons.ts'
 
 const ICON = 'data:image/webp;base64,FETCHED'
 
 // 抓取的编排逻辑由 icons.test.mjs 覆盖，这里只验对话框看到的那层状态：
 // 进度、停下的原因、以及出错时不会一直挂在「请稍后」上。
-function setup({ count = 4, fetchIcon = async () => ICON, applyIcons, bridge = true } = {}) {
+function setup({ count = 4, fetchIcon = async () => ICON, applyIcons, bridge = true, attachments = false } = {}) {
   const bookmarks = Array.from({ length: count }, (unused, index) => ({
     id: `web_${index}`, title: `站点${index}`, url: `https://s${index}.example.com/`, iconType: 'text', icon: 'S',
   }))
@@ -15,6 +16,8 @@ function setup({ count = 4, fetchIcon = async () => ICON, applyIcons, bridge = t
   const toasts = []
   // 没有这个桥接层就抓不了（浏览器预览里就是这种情况）。
   globalThis.window = bridge ? { funlink: { fetchIcon: async () => '' } } : {}
+  // 有附件接口时图标不再内联进整库文档，记账的单价跟着变（见 lib/iconStore.ts）。
+  if (attachments) globalThis.window.utools = { db: { promises: { postAttachment: async () => ({ ok: true }) } } }
   const backfill = useIconBackfill({
     state,
     storageError: ref(''),
@@ -100,6 +103,25 @@ test('一张都不需要抓时说清楚，而不是静悄悄', async () => {
     assert.equal(backfill.finished, false, '没真的跑过，不该显示上一轮的结果')
   } finally {
     cleanup()
+  }
+})
+
+// 「剩余空间还能放约 N 张图标」这句话原先按一张图几 KB 算。图标挪进附件之后
+// 文档里每张只多一个 ID，再这么算的话明明放得下也会劝用户先清废纸篓。
+test('存得进附件时，能放的图标张数按一张一个 ID 算', () => {
+  // 两份得分开跑：globalThis.window 只有一个，capacity 又是惰性求值的，
+  // 装上附件接口之后再读上一份的 capacity，读到的就是新单价了。
+  const inline = setup()
+  const inlineCapacity = inline.backfill.capacity
+  assert.equal(inlineCapacity, Math.floor(inline.backfill.remainingBytes / ICON_COST_ESTIMATE))
+  inline.cleanup()
+
+  const attached = setup({ attachments: true })
+  try {
+    assert.equal(attached.backfill.capacity, Math.floor(attached.backfill.remainingBytes / ICON_REF_COST))
+    assert.ok(attached.backfill.capacity > inlineCapacity * 10, '同样的剩余空间，存进附件能多放两个数量级的图标')
+  } finally {
+    attached.cleanup()
   }
 })
 

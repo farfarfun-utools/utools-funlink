@@ -1,6 +1,7 @@
 import type { Ref } from 'vue'
 import { displayHost } from '../lib/core'
 import { quickFeatureTarget } from '../lib/features'
+import { bookmarkIconUrl } from '../lib/image'
 import { pushableBookmarks } from '../lib/views'
 import type { AppState, Bookmark } from '../lib/types'
 
@@ -62,7 +63,9 @@ export function setupUtoolsHost({ state, search, openLink, addBookmark, dismissK
       if (!pushedIds.has(bookmark.title)) pushedIds.set(bookmark.title, bookmark.id)
     })
     return matched.map(bookmark => ({
-      icon: 'logo.png',
+      // 每张卡片用自己的图标，不是插件 logo——推送列表里全是同一个图标的话，
+      // 用户得读完文字才知道哪条是哪条。
+      icon: bookmarkIconUrl(bookmark),
       text: bookmark.title,
       title: bookmark.description || displayHost(bookmark.url),
     }))

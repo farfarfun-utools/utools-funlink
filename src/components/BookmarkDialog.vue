@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, nextTick, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { initials, normalizeUrl } from '../lib/core'
-import { toIconDataUrl } from '../lib/image'
+import { fetchSiteIcon, toIconDataUrl } from '../lib/image'
 import { safeColor } from '../lib/core'
 import type { BrowserMode, Bookmark, Category } from '../lib/types'
 
@@ -27,11 +27,16 @@ interface BookmarkForm {
 const COLORS = ['#8480f9', '#2792ff', '#1fd88b', '#fdcd05', '#ff7ba2', '#98d517', '#ff7f1b', '#07b882']
 // 图标以 data URL 存进 dbStorage。选图时会按显示尺寸压缩，这里卡的是解码前的原图体积。
 const MAX_ICON_BYTES = 200 * 1024
-const props = defineProps<{
+// 网址是一个字一个字敲（或整段粘贴）出来的，等手停下来再去抓，
+// 否则一个网址要抓十几次。
+const AUTO_ICON_DELAY = 600
+const props = withDefaults(defineProps<{
   categories: Category[]
   defaultCategoryId: string
   bookmarkCount: number
-}>()
+  /** 填完网址自动去站点抓图标，对应设置里的「自动抓取图标」。 */
+  autoIcon?: boolean
+}>(), { autoIcon: true })
 const emit = defineEmits(['save'])
 const dialog = ref<HTMLDialogElement | null>(null)
 const urlInput = ref<HTMLInputElement | null>(null)
@@ -42,12 +47,19 @@ const expanded = ref(false)
 const categoryOpen = ref(false)
 const activeCategoryRootId = ref('')
 const error = ref('')
+const fetchingIcon = ref(false)
 const form = reactive<BookmarkForm>(blankForm())
+// 自动抓取只在用户自己没定过图标时动手；已经抓过（或已处理过）的网址不再抓第二遍。
+let iconTouched = false
+let handledUrl = ''
+let iconTimer: ReturnType<typeof setTimeout> | null = null
 const roots = computed(() => props.categories.filter(category => !category.parentId))
 const childrenOf = (id: string) => props.categories.filter(category => category.parentId === id)
 // 「收集箱」不是真实分类，但在选择器里要能被勾上，所以拼成一个同形状的伪分类。
 const categoryRoots = computed<Category[]>(() => [...roots.value, { id: 'cat@default', name: '收集箱', parentId: '' }])
 const activeCategoryChildren = computed(() => childrenOf(activeCategoryRootId.value))
+// 只有 http(s) 的网址才有网页图标可抓，file / ftp 没有。
+const canFetchIcon = computed(() => /^https?:\/\//i.test(form.url.trim()))
 const selectedCategories = computed<{ id: string, name: string }[]>(() => form.categoryIds.flatMap(id => {
   if (id === 'cat@default') return [{ id, name: '收集箱' }]
   const category = props.categories.find(item => item.id === id)
@@ -83,12 +95,72 @@ function open(bookmark: Partial<Bookmark> | null = null, insertAfterId: string |
     : []
   form.color = safeColor(form.color)
   expanded.value = editing.value || /^(https?|ftp|file):\/\//i.test(form.url)
+  // 编辑已有卡片时把当前网址记成「已处理」：点开弹窗不该把人家原来的图标换掉。
+  // 新建时不记，这样从主搜索框带着网址进来的那条路也会自动抓。
+  handledUrl = editing.value ? form.url.trim() : ''
+  iconTouched = editing.value && form.iconType === 'image' && Boolean(form.iconData)
+  stopIconFetch()
   if (!dialog.value?.open) dialog.value?.showModal()
 }
 
 function close() {
   categoryOpen.value = false
+  stopIconFetch()
   dialog.value?.close()
+}
+
+function stopIconFetch() {
+  if (iconTimer) clearTimeout(iconTimer)
+  iconTimer = null
+  fetchingIcon.value = false
+}
+
+/**
+ * 去站点抓一张图标填进表单。抓不到就什么都不做，保持文字图标。
+ * @param force 用户自己点的「抓取图标」，哪怕已经定过图标也照换
+ */
+async function fetchIcon(url: string, { force = false } = {}) {
+  handledUrl = url
+  fetchingIcon.value = true
+  // 搜索类网址带着 {q} 占位符，原样请求是个无意义的地址；
+  // 去掉占位符后站点首页和 /favicon.ico 兜底都还在。
+  const icon = await fetchSiteIcon(url.replaceAll('{q}', ''))
+  // 抓的这几秒里用户可能又改了网址，或者把弹窗关掉开了另一张卡片，
+  // 那这张图就不是当前这条网址的图标了，丢掉。
+  if (form.url.trim() !== url) return
+  fetchingIcon.value = false
+  if (!icon || (iconTouched && !force)) return
+  form.iconData = icon
+  form.iconType = 'image'
+}
+
+/** 手动抓图标：自动抓取关着、抓过没抓到、或者想换一张时用。 */
+async function fetchIconNow() {
+  const url = form.url.trim()
+  if (fetchingIcon.value || !/^https?:\/\//i.test(url)) return
+  // 定时器还挂着的话等会儿又抓一次，这次手动的就白点了。
+  stopIconFetch()
+  await fetchIcon(url, { force: true })
+  // 抓的过程中又改了网址，这次手动抓取就当没发生过。
+  if (form.url.trim() !== url) return
+  // 手动抓过就算用户定过图标：之后改网址不该再自动盖掉它。
+  iconTouched = true
+  if (form.iconType !== 'image' || !form.iconData) error.value = '没抓到这个网站的图标'
+}
+
+function scheduleIconFetch() {
+  // 网址一改，在飞的那次抓取结果就作废了（上面的 form.url 判断会丢掉它），
+  // 所以转圈也该停下来，等这次的定时器到点再转。
+  stopIconFetch()
+  if (!props.autoIcon || iconTouched) return
+  const url = form.url.trim()
+  // 只抓 http(s)：file / ftp 没有网页图标可读。地址没填全（协议都还没敲完）时
+  // 界面还是骨架屏，这时去抓只会抓到一堆 404。
+  if (!/^https?:\/\//i.test(url) || url === handledUrl) return
+  iconTimer = setTimeout(() => {
+    iconTimer = null
+    fetchIcon(url)
+  }, AUTO_ICON_DELAY)
 }
 
 function addUrl() { form.urls.push('') }
@@ -110,6 +182,9 @@ async function readIcon(event: Event) {
   try {
     form.iconData = await toIconDataUrl(file)
     form.iconType = 'image'
+    // 用户自己选了图，在飞的自动抓取结果就别再往上盖了。
+    iconTouched = true
+    stopIconFetch()
     error.value = ''
   } catch {
     error.value = '图片读取失败'
@@ -121,9 +196,17 @@ function useImageIcon() {
   if (!form.iconData) pickIcon()
 }
 
+function useTextIcon() {
+  form.iconType = 'text'
+  iconTouched = true
+  stopIconFetch()
+}
+
 function clearIcon() {
   form.iconData = ''
   form.iconType = 'text'
+  iconTouched = true
+  stopIconFetch()
 }
 
 function submit() {
@@ -214,7 +297,11 @@ watch(() => form.url, value => {
   expanded.value = editing.value || /^(https?|ftp|file):\/\//i.test(String(value || '').trim())
   if (expanded.value && !form.title && editing.value) form.title = ''
   error.value = ''
+  scheduleIconFetch()
 })
+
+// 弹窗是常驻组件，正常关闭走 close()；这里兜住组件被卸载的情况，别留着定时器。
+onBeforeUnmount(stopIconFetch)
 
 defineExpose({ open, close })
 </script>
@@ -237,6 +324,7 @@ defineExpose({ open, close })
             <span class="web-preview-icon" :class="{ empty: form.iconType === 'image' && !form.iconData, ripple: !editing && form.iconType === 'image' && !form.iconData }" :style="{ backgroundColor: form.iconType === 'text' ? form.color : '' }">
               <img v-if="form.iconType === 'image' && form.iconData" :src="form.iconData" alt="" />
               <template v-else-if="form.iconType === 'text'">{{ form.icon || initials(form.title) }}</template>
+              <span v-if="fetchingIcon" class="icon-spinner" role="status" aria-label="正在抓取网站图标" />
             </span>
             <div class="web-preview-fields">
               <label><span class="sr-only">网站名称</span><input v-model="form.title" maxlength="20" placeholder="请输入网站名称" required /><small>{{ form.title.length }} / 20</small></label>
@@ -252,7 +340,7 @@ defineExpose({ open, close })
         <template v-if="expanded">
           <div class="icon-editor">
             <div class="icon-type-switch" role="group" aria-label="图标类型">
-              <button type="button" :class="{ active: form.iconType === 'text' }" @click="form.iconType = 'text'">文字</button>
+              <button type="button" :class="{ active: form.iconType === 'text' }" @click="useTextIcon">文字</button>
               <button type="button" :class="{ active: form.iconType === 'image' }" @click="useImageIcon">图片</button>
             </div>
             <template v-if="form.iconType === 'text'">
@@ -275,6 +363,7 @@ defineExpose({ open, close })
               <button v-if="form.iconData" type="button" class="icon-clear-image" @click="clearIcon">移除</button>
               <small>支持本地图片，最大 200KB</small>
             </template>
+            <button v-if="canFetchIcon" type="button" class="icon-fetch" :disabled="fetchingIcon" @click="fetchIconNow">{{ fetchingIcon ? '抓取中...' : '抓取网站图标' }}</button>
           </div>
 
           <div class="bookmark-options-row">

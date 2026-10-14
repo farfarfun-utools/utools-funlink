@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { toIconDataUrl } from '../src/lib/image.ts'
+import { bookmarkIconUrl, dataUrlToBlob, fetchSiteIcon, textIconDataUrl, toIconDataUrl } from '../src/lib/image.ts'
 
 // jsdom 没有 createImageBitmap，canvas 的 getContext 也返回 null，
 // 所以这里把这两样换成记录调用的替身：要验的是缩放算得对不对、
@@ -73,5 +73,123 @@ test('toIconDataUrl 把最大边长作为参数暴露出来，缩放规则可以
   await withBitmap({ width: 400, height: 200 }, async ({ drawn }) => {
     await toIconDataUrl(new Blob(['x'.repeat(50 * 1024)], { type: 'image/png' }), 40)
     assert.deepEqual(drawn, [[0, 0, 40, 20]])
+  })
+})
+
+// 画「底色 + 文字」的图标只用到 2D 上下文的几个方法，这里记下调用参数就够验行为了。
+function withTextCanvas(encoded, run) {
+  const calls = { arc: [], text: [], colors: [], fonts: [] }
+  const createElement = document.createElement.bind(document)
+  document.createElement = tag => {
+    if (tag !== 'canvas') return createElement(tag)
+    return {
+      width: 0,
+      height: 0,
+      getContext: () => ({
+        set fillStyle(value) { calls.colors.push(value) },
+        set font(value) { calls.fonts.push(value) },
+        textAlign: '',
+        textBaseline: '',
+        beginPath() {},
+        fill() {},
+        arc: (...args) => calls.arc.push(args),
+        fillText: (...args) => calls.text.push(args),
+      }),
+      toDataURL: () => encoded,
+    }
+  }
+  try {
+    return run(calls)
+  } finally {
+    document.createElement = createElement
+  }
+}
+
+function withBridge(fetchIcon, run) {
+  window.funlink = { fetchIcon }
+  try {
+    return run()
+  } finally {
+    delete window.funlink
+  }
+}
+
+test('fetchSiteIcon 把 preload 抓回来的图压到 64px 再存', async () => {
+  // 一个 1×1 的 png：抓回来的原图可能是 512px，存之前必须压。
+  const raw = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='
+  await withBitmap({ width: 512, height: 512 }, async ({ drawn }) => {
+    const icon = await withBridge(async () => raw, () => fetchSiteIcon('https://example.com'))
+    assert.equal(icon, 'data:image/webp;base64,SHRUNK')
+    assert.deepEqual(drawn, [[0, 0, 64, 64]], '自动抓的图标每张卡片都有一张，比手动上传更要省体积')
+  })
+})
+
+test('fetchSiteIcon 抓不到图标时返回空串，让调用方保持文字图标', async () => {
+  assert.equal(await withBridge(async () => '', () => fetchSiteIcon('https://example.com')), '')
+  assert.equal(await withBridge(async () => { throw new Error('超时') }, () => fetchSiteIcon('https://example.com')), '')
+  // 浏览器里预览时没有 preload 桥接层。
+  assert.equal(await fetchSiteIcon('https://example.com'), '')
+})
+
+test('fetchSiteIcon 丢掉压不动又太大的图标，不占掉公共的 1MB 额度', async () => {
+  // svg 解不开位图，只能原样留，这时体积就得自己把关。
+  globalThis.createImageBitmap = async () => { throw new Error('unsupported source') }
+  try {
+    const svg = `data:image/svg+xml;base64,${btoa(`<svg>${'x'.repeat(40 * 1024)}</svg>`)}`
+    assert.equal(await withBridge(async () => svg, () => fetchSiteIcon('https://example.com')), '')
+    const small = `data:image/svg+xml;base64,${btoa('<svg xmlns="http://www.w3.org/2000/svg"></svg>')}`
+    assert.ok((await withBridge(async () => small, () => fetchSiteIcon('https://example.com'))).startsWith('data:image/svg+xml;'))
+  } finally {
+    delete globalThis.createImageBitmap
+  }
+})
+
+test('dataUrlToBlob 解回原始字节，解析不了的返回 null', async () => {
+  const blob = dataUrlToBlob(`data:image/png;base64,${btoa('PNG-BYTES')}`)
+  assert.equal(blob.type, 'image/png')
+  assert.equal(await blob.text(), 'PNG-BYTES')
+  assert.equal(dataUrlToBlob('https://example.com/icon.png'), null)
+  assert.equal(dataUrlToBlob(''), null)
+})
+
+test('textIconDataUrl 把文字图标画成一张图，uTools 那边才有东西可显示', () => {
+  withTextCanvas('data:image/png;base64,TEXTICON', calls => {
+    assert.equal(textIconDataUrl('AB', '#2792ff'), 'data:image/png;base64,TEXTICON')
+    assert.deepEqual(calls.arc, [[32, 32, 32, 0, Math.PI * 2]], '底色画成一个铺满画布的圆')
+    assert.deepEqual(calls.text, [['AB', 32, 32]])
+    assert.ok(calls.colors.includes('#2792ff'), '圆的填充色用卡片自己的底色')
+  })
+})
+
+test('textIconDataUrl 字多了缩一号字号，4 个字也不会顶出圆外', () => {
+  withTextCanvas('data:image/png;base64,FOUR', calls => {
+    textIconDataUrl('ABCD', '#07b882')
+    assert.deepEqual(calls.fonts, ['500 19px sans-serif'])
+  })
+  withTextCanvas('data:image/png;base64,TWO', calls => {
+    textIconDataUrl('AB', '#07b882')
+    assert.deepEqual(calls.fonts, ['500 28px sans-serif'])
+  })
+})
+
+test('textIconDataUrl 同一个图标只画一次，主搜索框每敲一个字都要取图标', () => {
+  withTextCanvas('data:image/png;base64,CACHED', calls => {
+    textIconDataUrl('缓', '#ff7f1b')
+    textIconDataUrl('缓', '#ff7f1b')
+    assert.equal(calls.text.length, 1)
+  })
+  // 第二次连画布都不用建，缓存直接命中（此时替身已还原，真跑画布会拿不到上下文）。
+  assert.equal(textIconDataUrl('缓', '#ff7f1b'), 'data:image/png;base64,CACHED')
+})
+
+test('bookmarkIconUrl 有图片图标就用它，文字图标现画一张', () => {
+  assert.equal(bookmarkIconUrl({ iconType: 'image', iconData: 'data:image/webp;base64,SAVED' }), 'data:image/webp;base64,SAVED')
+  withTextCanvas('data:image/png;base64,FROMTEXT', calls => {
+    assert.equal(bookmarkIconUrl({ title: 'Hacker News', color: '#8480f9' }), 'data:image/png;base64,FROMTEXT')
+    assert.deepEqual(calls.text, [['HN', 32, 32]], '没写图标文字就用标题缩写，跟卡片上显示的一致')
+  })
+  // 图片图标但没有图片数据（旧数据里有这种），不能渲染成空白。
+  withTextCanvas('data:image/png;base64,FALLBACK', () => {
+    assert.equal(bookmarkIconUrl({ title: '示例', iconType: 'image', iconData: '', icon: '示' }), 'data:image/png;base64,FALLBACK')
   })
 })

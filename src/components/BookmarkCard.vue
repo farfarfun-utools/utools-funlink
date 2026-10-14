@@ -6,7 +6,8 @@ import type { Bookmark } from '../lib/types'
 
 const props = withDefaults(defineProps<{ bookmark: Bookmark, trashView?: boolean }>(), { trashView: false })
 const emit = defineEmits(['open', 'note', 'context-menu', 'drag-start', 'drop'])
-// 只用本地图片（用户上传后存成 data URL），不向任何第三方 favicon 服务发请求。
+// 只渲染存在本地的图（用户上传或添加时抓来的，都存成 data URL），
+// 渲染时不发任何请求，更不经过第三方 favicon 服务。
 const iconImage = computed(() => (props.bookmark.iconType === 'image' ? props.bookmark.iconData : '') || '')
 </script>
 

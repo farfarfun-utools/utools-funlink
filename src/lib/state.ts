@@ -9,6 +9,7 @@ export const DEFAULT_SETTINGS: Settings = {
   search: ['title', 'description', 'url'],
   importSplit: '-,_,|,:,/,||',
   navbar: { rounded: 36 },
+  autoIcon: true,
 }
 
 /** 读取书签的兼容分类 ID 列表。 */

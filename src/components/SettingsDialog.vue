@@ -7,6 +7,7 @@
 import { computed, reactive, ref } from 'vue'
 import emptyImage from '../assets/empty.svg'
 import emptyDarkImage from '../assets/empty-dark.svg'
+import type { IconBackfill } from '../composables/useIconBackfill'
 import { decryptSecret, encryptSecret } from '../lib/secret'
 import { readStorage, writeStorage } from '../lib/storage'
 import type { AppState, Bookmark, Settings } from '../lib/types'
@@ -38,6 +39,8 @@ interface IgnoredLink {
 
 const props = withDefaults(defineProps<{
   settings: Settings
+  /** 批量抓图标的状态，由 useIconBackfill 提供；本组件只管展示和按钮。 */
+  backfill: IconBackfill
   bookmarks?: Bookmark[]
   backupData?: AppState | null
 }>(), { bookmarks: () => [], backupData: null })
@@ -45,6 +48,7 @@ const emit = defineEmits(['save-settings', 'clear-cookies', 'export', 'data-file
 const dialog = ref<HTMLDialogElement | null>(null)
 const webdavDialog = ref<HTMLDialogElement | null>(null)
 const invalidDialog = ref<HTMLDialogElement | null>(null)
+const iconDialog = ref<HTMLDialogElement | null>(null)
 const webdavListDialog = ref<HTMLDialogElement | null>(null)
 const restoreInput = ref<HTMLInputElement | null>(null)
 const importInput = ref<HTMLInputElement | null>(null)
@@ -254,6 +258,16 @@ function closeInvalidDialog() {
   invalidDialog.value?.close()
 }
 
+/** 关掉对话框就停掉在跑的抓取：看不见进度了还在一个个访问网站不合理。 */
+function closeIconDialog() {
+  props.backfill.stop()
+  iconDialog.value?.close()
+}
+
+function kilobytes(bytes: number) {
+  return `${Math.round(bytes / 1024)}KB`
+}
+
 function ignoreLink(bookmark: InvalidLink) {
   invalidResults.value = invalidResults.value.filter(item => item.id !== bookmark.id)
   ignoredLinks.value.unshift({ title: bookmark.title, url: bookmark.url })
@@ -310,6 +324,17 @@ defineExpose({ open, close })
         </section>
 
         <div class="settings-divider" />
+        <section class="setting-field">
+          <h3>自动抓取图标</h3>
+          <label class="switch-line">
+            <input v-model="settings.autoIcon" type="checkbox" />
+            <span class="switch-control" aria-hidden="true" />
+            <span>{{ settings.autoIcon ? '添加卡片时访问该网站取图标' : '只用文字图标或本地图片' }}</span>
+          </label>
+          <p class="setting-help">图标直接从收藏的网站取，不经过第三方 favicon 服务。抓不到就保留文字图标。</p>
+        </section>
+
+        <div class="settings-divider" />
         <section class="setting-field search-setting">
           <h3>卡片搜索</h3>
           <div class="checkbox-row">
@@ -349,6 +374,11 @@ defineExpose({ open, close })
           <div class="import-notes">
             1、支持chrome、edge浏览器导出的html格式数据 2、导入之前请先<span>备份</span>数据，以防数据丢失！！！ 3、导入成功后需<span>“完全退出插件”</span>再打开才能生效
           </div>
+        </section>
+        <section class="data-field">
+          <h3>网站图标</h3>
+          <button type="button" class="data-button primary icon-fetch-entry" @click="iconDialog?.showModal()">批量抓取图标</button>
+          <p class="setting-help">给已经收藏的卡片补上网站图标。图标直接从各个网站取，不经过第三方服务。</p>
         </section>
         <section class="data-field">
           <h3>链接检查</h3>
@@ -391,5 +421,30 @@ defineExpose({ open, close })
       <div v-if="ignoredLinks.length" class="invalid-result-list"><div v-for="(item, index) in ignoredLinks" :key="item.url"><span>{{ item.title }}</span><a :href="item.url">{{ item.url }}</a><button type="button" @click="unignoreLink(index)">取消</button></div></div>
       <div v-else class="invalid-empty"><img class="empty-image-light" :src="emptyImage" alt="" /><img class="empty-image-dark" :src="emptyDarkImage" alt="" /><span>暂无数据</span></div>
     </template>
+  </dialog>
+
+  <dialog ref="iconDialog" class="icon-fetch-modal">
+    <header>
+      <button v-if="backfill.running" type="button" class="data-button warning" @click="backfill.stop()">停止抓取</button>
+      <button v-else type="button" class="data-button primary" :disabled="!backfill.candidates.length" @click="backfill.start()">{{ backfill.finished ? '继续抓取' : '开始抓取' }}</button>
+      <button type="button" aria-label="关闭" @click="closeIconDialog()">×</button>
+    </header>
+    <div class="icon-fetch-summary">
+      <template v-if="backfill.running">已处理 <b>{{ backfill.done }}</b> / {{ backfill.candidates.length }} 张，抓到 <b>{{ backfill.filled }}</b> 张，请稍后...</template>
+      <template v-else>有 <b>{{ backfill.candidates.length }}</b> 张卡片需要抓图标，当前数据 <b>{{ kilobytes(backfill.storageBytes) }}</b>，剩余空间约够放 <b>{{ backfill.capacity }}</b> 张。</template>
+    </div>
+    <p class="icon-fetch-note">逐个访问这些网站取图标，不经过第三方 favicon 服务。整库收藏共用 1MB 额度，装不下时会停下来告诉你。</p>
+    <label class="switch-line icon-fetch-option">
+      <input v-model="backfill.includeExisting" type="checkbox" :disabled="backfill.running" />
+      <span class="switch-control" aria-hidden="true" />
+      <span>连已有图片图标的卡片一起重新抓</span>
+    </label>
+    <div v-if="backfill.failures.length" class="icon-fetch-list">
+      <div v-for="item in backfill.failures" :key="item.id"><span>{{ item.title }}</span><a :href="item.url">{{ item.url }}</a><em>{{ item.reason }}</em></div>
+    </div>
+    <div v-else class="invalid-empty">
+      <img class="empty-image-light" :src="emptyImage" alt="" /><img class="empty-image-dark" :src="emptyDarkImage" alt="" />
+      <span>{{ backfill.finished ? '这一轮没有抓失败的卡片' : '抓不到图标的网站会列在这里，这些卡片保持原来的文字图标' }}</span>
+    </div>
   </dialog>
 </template>

@@ -1,4 +1,5 @@
 import type { Ref } from 'vue'
+import { fetchSiteIcon } from '../lib/image'
 import { buildBookmark, describeBookmark, findBookmark, findByUrl, listCategories, searchBookmarks } from '../lib/tools'
 import type { AppState, Bookmark } from '../lib/types'
 
@@ -30,11 +31,17 @@ export function registerAiTools({ state, saveBookmark, openLink }: AiToolsOption
 
   window.utools.registerTool('list_categories', () => listCategories(state.value))
 
-  window.utools.registerTool('add_bookmark', params => {
+  window.utools.registerTool('add_bookmark', async params => {
     const bookmark = buildBookmark(state.value, params)
     const existing = findByUrl(state.value, bookmark.url)
     // 已经收藏过就把现成的那张返回去，不新建也不报错——重复调用是幂等的。
     if (existing) return { created: false, bookmark: describeBookmark(state.value, existing) }
+    // 界面上那条路由弹窗负责抓图标，这条路没有界面，只能在这儿抓。
+    // 抓不到就保持 buildBookmark 给的文字图标。
+    if (state.value.settings.autoIcon) {
+      const icon = await fetchSiteIcon(bookmark.url)
+      if (icon) Object.assign(bookmark, { iconType: 'image', iconData: icon })
+    }
     // 抛错而不是返回 { ok: false }：写不进去就是没收藏成功，Agent 必须知道。
     if (!saveBookmark(bookmark)) throw new Error('收藏没有保存成功，可能是数据已超出 uTools 单个文档 1MB 上限，请让用户在插件里清理后重试')
     return { created: true, bookmark: describeBookmark(state.value, bookmark) }

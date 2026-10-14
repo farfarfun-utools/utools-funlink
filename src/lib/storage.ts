@@ -21,7 +21,8 @@ export interface Snapshot {
 
 // uTools 单个数据库文档上限 1MB，超了就写不进去。留 124KB 余量给 _id/_rev
 // 这些文档自带字段和编码差异，所以阈值按 900KB 算。
-const MAX_DOC_BYTES = 900 * 1024
+// 导出给批量抓图标用：那边要先算出还能塞下多少张图标（见 lib/icons.ts）。
+export const MAX_DOC_BYTES = 900 * 1024
 
 // uTools 内走 dbStorage，浏览器预览时退回 localStorage。
 // 统一从这里读写，避免同一份数据一半在 dbStorage、一半在 localStorage。

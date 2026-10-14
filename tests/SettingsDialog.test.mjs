@@ -22,9 +22,24 @@ function settings() {
   }
 }
 
+// 批量抓图标的状态整个由 useFunLink 传进来（真实实现见 useIconBackfill），
+// 本组件只管展示和按钮，所以这里给一个记调用次数的替身就够了。
+function fakeBackfill(overrides = {}) {
+  const backfill = {
+    running: false, finished: false, includeExisting: false,
+    done: 0, filled: 0, failed: 0, failures: [],
+    candidates: [], storageBytes: 0, capacity: 0,
+    calls: { start: 0, stop: 0 },
+    start: () => { backfill.calls.start += 1 },
+    stop: () => { backfill.calls.stop += 1 },
+    ...overrides,
+  }
+  return backfill
+}
+
 function mountDialog(props = {}) {
   stubDialog()
-  return mount(SettingsDialog, { attachTo: document.body, props: { settings: settings(), ...props } })
+  return mount(SettingsDialog, { attachTo: document.body, props: { settings: settings(), backfill: fakeBackfill(), ...props } })
 }
 
 async function openDataTab(wrapper) {
@@ -283,6 +298,57 @@ test('扫描可以中途停止，停掉之后在飞的结果不再入列', async
   await nextTick()
   await nextTick()
   assert.equal(wrapper.find('.invalid-result-list').exists(), false)
+})
+
+// 整库收藏共用 1MB，几百张图标就能把它填满。用户点「开始抓取」之前就得知道
+// 这一轮装不装得下，不然抓到一半停下来才发现。
+test('批量抓图标的摘要里有待抓张数、当前体积和剩余可存张数', async () => {
+  const backfill = fakeBackfill({ candidates: [{ id: 'web_1' }, { id: 'web_2' }], storageBytes: 320 * 1024, capacity: 170 })
+  const wrapper = await openDataTab(mountDialog({ backfill }))
+
+  await wrapper.find('.icon-fetch-entry').trigger('click')
+
+  assert.equal(wrapper.find('.icon-fetch-modal').element.open, true)
+  const summary = wrapper.find('.icon-fetch-summary').text()
+  assert.match(summary, /有 2 张卡片需要抓图标/)
+  assert.match(summary, /当前数据 320KB/)
+  assert.match(summary, /剩余空间约够放 170 张/)
+})
+
+test('开始/停止按钮跟着 running 切换，点下去就调到 backfill 上', async () => {
+  const idle = fakeBackfill({ candidates: [{ id: 'web_1' }] })
+  const wrapper = await openDataTab(mountDialog({ backfill: idle }))
+  const button = () => wrapper.find('.icon-fetch-modal header .data-button')
+
+  assert.equal(button().text(), '开始抓取')
+  await button().trigger('click')
+  assert.deepEqual(idle.calls, { start: 1, stop: 0 })
+
+  const running = fakeBackfill({ running: true, candidates: [{ id: 'web_1' }], done: 3, filled: 2 })
+  await wrapper.setProps({ backfill: running })
+  assert.equal(button().text(), '停止抓取')
+  assert.match(wrapper.find('.icon-fetch-summary').text(), /已处理 3 \/ 1 张，抓到 2 张/)
+
+  await button().trigger('click')
+  assert.deepEqual(running.calls, { start: 0, stop: 1 })
+})
+
+test('抓不到图标的网站列出来，关掉对话框就停掉在跑的抓取', async () => {
+  const backfill = fakeBackfill({
+    running: true,
+    candidates: [{ id: 'web_1' }],
+    failures: [{ id: 'web_1', title: '内网系统', url: 'https://intra.example.com/', reason: '没找到图标' }],
+  })
+  const wrapper = await openDataTab(mountDialog({ backfill }))
+  await wrapper.find('.icon-fetch-entry').trigger('click')
+
+  const rows = wrapper.findAll('.icon-fetch-list > div').map(row => row.text())
+  assert.equal(rows.length, 1)
+  assert.ok(rows[0].includes('内网系统') && rows[0].includes('没找到图标'))
+
+  await wrapper.find('.icon-fetch-modal header > button:last-child').trigger('click')
+  assert.equal(backfill.calls.stop, 1, '看不见进度了还在一个个访问网站不合理')
+  assert.equal(wrapper.find('.icon-fetch-modal').element.open, false)
 })
 
 test('忽略链接后它不再参与扫描，并且写进了存储', async () => {

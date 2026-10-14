@@ -65,7 +65,15 @@ function requestError(context, error) {
   return new Error(`${context}: ${error.message}`, { cause: error })
 }
 
-function request(url, { method = 'GET', headers = {}, body = '', timeout = 10000, redirects = 3, allowedOrigin } = {}) {
+/**
+ * 发一个 HTTP(S) 请求。
+ *
+ * `binary` 为 true 时 body 是 Buffer（抓图标要的是原始字节，转 utf8 会把图弄坏）。
+ * `maxBytes` 是响应体上限，超了之后的处理按 body 类型分：文本截断就够用
+ * （抓图标只需要 HTML 的 `<head>`），而截断的二进制是一张坏图，只能当失败。
+ * 解析结果带上 `url`，因为跟完重定向后相对地址要按落地的地址解析。
+ */
+function request(url, { method = 'GET', headers = {}, body = '', timeout = 10000, redirects = 3, allowedOrigin, binary = false, maxBytes = 0 } = {}) {
   return new Promise((resolve, reject) => {
     let target
     try {
@@ -80,25 +88,125 @@ function request(url, { method = 'GET', headers = {}, body = '', timeout = 10000
       if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location && redirects) {
         response.resume()
         try {
-          return resolve(request(new URL(response.headers.location, target).href, { method, headers, body, timeout, redirects: redirects - 1, allowedOrigin }))
+          return resolve(request(new URL(response.headers.location, target).href, { method, headers, body, timeout, redirects: redirects - 1, allowedOrigin, binary, maxBytes }))
         } catch (error) {
           return reject(requestError(context, error))
         }
       }
       const chunks = []
-      response.on('data', chunk => chunks.push(chunk))
-      response.on('end', () => {
-        const content = Buffer.concat(chunks).toString('utf8')
+      let received = 0
+      const finish = () => {
+        const payload = Buffer.concat(chunks)
         if (response.statusCode >= 200 && response.statusCode < 300 || method === 'MKCOL' && response.statusCode === 405) {
-          resolve({ status: response.statusCode, body: content })
+          resolve({ status: response.statusCode, url: target.href, headers: response.headers, body: binary ? payload : payload.toString('utf8') })
         } else reject(new Error(`${context}: ${response.statusCode} ${response.statusMessage || '请求失败'}`))
+      }
+      response.on('data', chunk => {
+        chunks.push(chunk)
+        received += chunk.length
+        if (!maxBytes || received <= maxBytes) return
+        response.destroy()
+        if (binary) reject(new Error(`${context}: 响应超过 ${Math.round(maxBytes / 1024)}KB 上限`))
+        else finish()
       })
+      response.on('end', finish)
     })
     req.setTimeout(timeout, () => req.destroy(new Error(`${timeout / 1000}秒超时`)))
     req.on('error', error => reject(requestError(context, error)))
     if (body) req.write(body)
     req.end()
   })
+}
+
+// 抓网页图标。只请求用户收藏的那个站点本身，不经过任何第三方 favicon 服务
+// （那种服务等于把用户收藏了哪些域名逐条告诉别人）。
+//
+// 图标声明都在 HTML 的 <head> 里，读 256KB 足够；候选图限 512KB，
+// 渲染进程还会再压一遍（见 src/lib/image.ts）。
+const ICON_HTML_BYTES = 256 * 1024
+const ICON_BYTES = 512 * 1024
+// 比 WebDAV 那条路短：这是一次「顺手」的抓取，失败就回落文字图标，不值得让用户干等。
+const ICON_TIMEOUT = 6000
+// 不少站点对没有 UA 的请求直接返 403。
+const ICON_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (compatible; FunLink uTools plugin)',
+  'Accept': 'text/html,image/*;q=0.9,*/*;q=0.8',
+}
+// 卡片上图标渲染为 42px，压缩后留 64px；候选图取 128px 这一档最稳：
+// 再大是白下载，再小放上去发糊。
+const ICON_TARGET_EDGE = 128
+
+const LINK_TAG = /<link\b[^>]*>/gi
+
+function attribute(tag, name) {
+  const matched = tag.match(new RegExp(`\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s"'>]+))`, 'i'))
+  return matched ? (matched[1] ?? matched[2] ?? matched[3] ?? '').trim() : ''
+}
+
+/** 从 sizes="16x16 32x32" 里取最大的边长；sizes="any"（矢量图）按足够大算。 */
+function largestSize(sizes) {
+  if (/\bany\b/i.test(sizes)) return ICON_TARGET_EDGE
+  return sizes.toLowerCase().split(/\s+/).reduce((max, item) => {
+    const [width, height] = item.split('x').map(Number)
+    return Number.isFinite(width) && width > 0 ? Math.max(max, width, Number.isFinite(height) ? height : 0) : max
+  }, 0)
+}
+
+/** 解析 HTML 里声明的图标地址，按离目标边长的远近排好序，并在末尾补上 /favicon.ico 兜底。 */
+function iconCandidates(html, pageUrl) {
+  const found = []
+  for (const tag of String(html).match(LINK_TAG) || []) {
+    const rel = attribute(tag, 'rel').toLowerCase()
+    const tokens = rel.split(/\s+/)
+    if (!tokens.some(token => token === 'icon' || token.startsWith('apple-touch-icon'))) continue
+    // mask-icon 是单色蒙版图，当图标用会渲染成一团纯色。
+    if (tokens.includes('mask-icon')) continue
+    const href = attribute(tag, 'href')
+    if (!href) continue
+    let resolved
+    try {
+      resolved = new URL(href, pageUrl)
+    } catch {
+      continue
+    }
+    if (!['http:', 'https:'].includes(resolved.protocol)) continue
+    // 没写 sizes 的默认 favicon 多是 16/32，apple-touch-icon 按惯例是 180。
+    const size = largestSize(attribute(tag, 'sizes')) || (rel.includes('apple-touch-icon') ? 180 : 32)
+    found.push({ url: resolved.href, size })
+  }
+  found.sort((left, right) => Math.abs(left.size - ICON_TARGET_EDGE) - Math.abs(right.size - ICON_TARGET_EDGE))
+  // 绝大多数站点都有 /favicon.ico，就算 HTML 里一个字都没声明。
+  try {
+    found.push({ url: new URL('/favicon.ico', pageUrl).href, size: 32 })
+  } catch { /* 页面地址非法，没有兜底可补 */ }
+  // 去重后只试前几张：抓图标是顺手做的事，不该为一张图把整个站点翻一遍。
+  return [...new Map(found.map(item => [item.url, item])).values()].slice(0, 4)
+}
+
+/**
+ * 按文件头认图片类型。
+ * 不信 Content-Type：很多站点给 /favicon.ico 返回的是带 200 状态码的 HTML 404 页面，
+ * 信了就会把一个网页存成卡片图标。
+ */
+function imageMime(buffer) {
+  const head = buffer.subarray(0, 16)
+  const ascii = offset => head.subarray(offset, offset + 4).toString('ascii')
+  if (head.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return 'image/png'
+  if (head.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff]))) return 'image/jpeg'
+  if (ascii(0) === 'RIFF' && ascii(8) === 'WEBP') return 'image/webp'
+  if (head.subarray(0, 3).toString('ascii') === 'GIF') return 'image/gif'
+  if (head.subarray(0, 4).equals(Buffer.from([0x00, 0x00, 0x01, 0x00]))) return 'image/x-icon'
+  // svg 是文本，没有魔数，只能看开头是不是真的 svg 标签。
+  const text = buffer.subarray(0, 512).toString('utf8').trimStart().toLowerCase()
+  if ((text.startsWith('<?xml') || text.startsWith('<svg')) && text.includes('<svg')) return 'image/svg+xml'
+  return ''
+}
+
+async function downloadIcon(url) {
+  const result = await request(url, { headers: ICON_HEADERS, timeout: ICON_TIMEOUT, binary: true, maxBytes: ICON_BYTES })
+  if (!result.body.length) return ''
+  const mime = imageMime(result.body)
+  return mime ? `data:${mime};base64,${result.body.toString('base64')}` : ''
 }
 
 // 备份目录。历史版本沿用了原插件的中文目录名，现改为 FunLink；
@@ -175,5 +283,34 @@ window.funlink = {
   async checkUrl(url) {
     const result = await request(url, { method: 'HEAD' })
     return result.status
+  },
+  /**
+   * 抓取网址对应站点的图标，返回 data URL；抓不到返回空串。
+   * 不抛错：这是添加卡片时顺手做的事，失败就让调用方回落文字图标，不该把保存流程打断。
+   */
+  async fetchIcon(url) {
+    let page
+    try {
+      page = new URL(url)
+    } catch {
+      return ''
+    }
+    if (!['http:', 'https:'].includes(page.protocol)) return ''
+    // 页面打不开也还有 /favicon.ico 可以试，所以读失败不算结束。
+    let html = ''
+    let base = page.href
+    try {
+      const result = await request(page.href, { headers: ICON_HEADERS, timeout: ICON_TIMEOUT, maxBytes: ICON_HTML_BYTES })
+      html = result.body
+      // 相对地址要按重定向落地后的地址解析，否则 example.com -> www.example.com 这类会解错。
+      base = result.url
+    } catch { /* 继续走兜底候选 */ }
+    for (const candidate of iconCandidates(html, base)) {
+      try {
+        const dataUrl = await downloadIcon(candidate.url)
+        if (dataUrl) return dataUrl
+      } catch { /* 这张拿不到就试下一张 */ }
+    }
+    return ''
   },
 }

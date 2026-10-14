@@ -1,3 +1,4 @@
+import { bookmarkIconUrl } from './image'
 import type { Bookmark } from './types'
 
 // 「网页快开」会把卡片注册成 uTools 的功能入口，code 统一用这个前缀。
@@ -17,7 +18,9 @@ export function syncQuickFeature(bookmark: Bookmark): void {
   const cmds: Feature['cmds'] = bookmark.url.includes('{q}')
     ? [bookmark.title, { type: 'over', label: bookmark.title }]
     : [bookmark.title]
-  window.utools.setFeature({ code: `${PREFIX}${bookmark.id}`, description: `打开 ${bookmark.title}`, icon: 'logo.png', mainHide: true, cmds })
+  // icon 用卡片自己的图标（uTools 的动态指令接受 data URL），这样主搜索框里
+  // 一眼能看出是哪个网站，而不是一排一模一样的插件 logo。
+  window.utools.setFeature({ code: `${PREFIX}${bookmark.id}`, description: `打开 ${bookmark.title}`, icon: bookmarkIconUrl(bookmark), mainHide: true, cmds })
 }
 
 /**

@@ -40,6 +40,86 @@ test('重定向跟随到达次数上限后明确报错，而不是死循环挂�
   })
 })
 
+// 最小的合法 png（1×1 透明），用来验证文件头识别和 base64 编码。
+const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64')
+
+test('fetchIcon 读 HTML 里声明的图标，返回 data URL', async () => {
+  const requested = []
+  await withServer((req, res) => {
+    requested.push(req.url)
+    if (req.url === '/') {
+      res.writeHead(200, { 'Content-Type': 'text/html' })
+      return res.end('<html><head><link rel="apple-touch-icon" sizes="180x180" href="/touch.png"><link rel="icon" sizes="16x16" href="/small.png"></head></html>')
+    }
+    res.writeHead(200, { 'Content-Type': 'image/png' })
+    res.end(PNG)
+  }, async base => {
+    const icon = await funlink.fetchIcon(`${base}/`)
+    assert.equal(icon, `data:image/png;base64,${PNG.toString('base64')}`)
+    // 16×16 放到卡片上会糊，应该先试尺寸更合适的那张。
+    assert.deepEqual(requested, ['/', '/touch.png'])
+  })
+})
+
+test('fetchIcon 在 HTML 没声明图标时回退到 /favicon.ico', async () => {
+  const requested = []
+  await withServer((req, res) => {
+    requested.push(req.url)
+    if (req.url === '/favicon.ico') {
+      res.writeHead(200, { 'Content-Type': 'image/png' })
+      return res.end(PNG)
+    }
+    res.writeHead(200, { 'Content-Type': 'text/html' })
+    res.end('<html><head><title>无图标</title></head></html>')
+  }, async base => {
+    const icon = await funlink.fetchIcon(`${base}/page/deep`)
+    assert.ok(icon.startsWith('data:image/png;base64,'))
+    assert.deepEqual(requested, ['/page/deep', '/favicon.ico'])
+  })
+})
+
+test('fetchIcon 不会把 200 状态码的 HTML 错误页当成图标', async () => {
+  await withServer((req, res) => {
+    // 很多站点就是这样处理 /favicon.ico 的：状态码 200，内容是一张网页。
+    res.writeHead(200, { 'Content-Type': 'image/x-icon' })
+    res.end('<!doctype html><html><body>Not Found</body></html>')
+  }, async base => {
+    assert.equal(await funlink.fetchIcon(`${base}/`), '')
+  })
+})
+
+test('fetchIcon 跳过超过体积上限的图，不把几 MB 的图塞进存储', async () => {
+  await withServer((req, res) => {
+    if (req.url === '/') {
+      res.writeHead(200, { 'Content-Type': 'text/html' })
+      return res.end('<html><head><link rel="icon" href="/huge.png"></head></html>')
+    }
+    res.writeHead(200, { 'Content-Type': 'image/png' })
+    res.end(Buffer.concat([PNG, Buffer.alloc(600 * 1024)]))
+  }, async base => {
+    // 唯一的候选超限，/favicon.ico 兜底也落到同一个处理函数上，两张都不要。
+    assert.equal(await funlink.fetchIcon(`${base}/`), '')
+  })
+})
+
+test('fetchIcon 在页面打不开时仍然试一次 /favicon.ico', async () => {
+  await withServer((req, res) => {
+    if (req.url === '/favicon.ico') {
+      res.writeHead(200, { 'Content-Type': 'image/png' })
+      return res.end(PNG)
+    }
+    res.writeHead(500)
+    res.end('boom')
+  }, async base => {
+    assert.ok((await funlink.fetchIcon(`${base}/`)).startsWith('data:image/png;base64,'))
+  })
+})
+
+test('fetchIcon 对非 http(s) 地址直接返回空串，不发请求', async () => {
+  assert.equal(await funlink.fetchIcon('file:///etc/passwd'), '')
+  assert.equal(await funlink.fetchIcon('不是网址'), '')
+})
+
 test('WebDAV 请求失败时，错误信息不会泄露 URL 或账号里的用户名密码', async () => {
   await withServer((req, res) => { res.writeHead(500); res.end('boom') }, async base => {
     const baseWithCreds = base.replace('http://', 'http://url-user:url-pass@')

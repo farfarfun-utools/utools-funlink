@@ -6,7 +6,9 @@ import { convertLegacyExport, isLegacyExport } from '../lib/legacy'
 import { commitStorage, readStorage, serializeForStorage } from '../lib/storage'
 import * as views from '../lib/views'
 import type { AppState, Bookmark, Category, CategoryAction } from '../lib/types'
+import type { IconUpdate } from '../lib/icons'
 import { registerAiTools } from './useAiTools'
+import { useIconBackfill } from './useIconBackfill'
 import { useKeywordPrompt } from './useKeywordPrompt'
 import { useToast } from './useToast'
 import { setupUtoolsHost } from './useUtoolsHost'
@@ -103,6 +105,34 @@ export function useFunLink() {
     bookmark.note = note
     if (saveState()) showToast('笔记已保存')
   }
+
+  /**
+   * 批量把抓来的图标写进卡片。返回是否落盘成功。
+   * 写失败就把这一批改回原样：内存和存储必须一致，否则后面每次保存都会
+   * 带着这批图标再撞一次同样的上限。
+   */
+  function applyIcons(updates: IconUpdate[]): boolean {
+    const changed = updates.flatMap(update => {
+      const bookmark = state.value.bookmarks.find(item => item.id === update.id)
+      if (!bookmark || !update.iconData) return []
+      const previous = { bookmark, iconType: bookmark.iconType, iconData: bookmark.iconData }
+      bookmark.iconType = 'image'
+      bookmark.iconData = update.iconData
+      // 快开入口的图标取自卡片，换了图标得重新注册一遍才会跟着变。
+      if (bookmark.quick) syncQuickFeature(bookmark)
+      return [previous]
+    })
+    if (!changed.length) return true
+    if (saveState()) return true
+    changed.forEach(({ bookmark, iconType, iconData }) => {
+      bookmark.iconType = iconType
+      bookmark.iconData = iconData
+      if (bookmark.quick) syncQuickFeature(bookmark)
+    })
+    return false
+  }
+
+  const iconBackfill = useIconBackfill({ state, storageError, applyIcons, showToast })
 
   function urlsOf(bookmark: Bookmark): string[] {
     const extras: unknown[] = Array.isArray(bookmark.urls) ? bookmark.urls : []
@@ -372,7 +402,7 @@ export function useFunLink() {
 
   return {
     state, search, toast, storageError, keywordPrompt, roots, activeCategoryId, activeRootId,
-    secondaryCategories, secondaryPosition, trashCount,
+    secondaryCategories, secondaryPosition, trashCount, iconBackfill, applyIcons,
     currentBookmarks, defaultCategoryId, childrenOf, categoryCount,
     setView, saveBookmark, saveNote, openLink, toggleFavorite, toggleQuick, moveToTrash,
     restoreBookmark, deleteBookmark, emptyTrash, reorderBookmarks, addCategory, categoryAction,

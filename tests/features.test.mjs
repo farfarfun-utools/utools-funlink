@@ -21,16 +21,50 @@ function withUtools(utools) {
   return utools
 }
 
+// 指令图标是把卡片的「底色 + 文字」画成一张小图（uTools 只认图片路径或 data URL）。
+// node 环境没有画布，这里给一个只返回固定结果的替身——画得对不对由 image.test.mjs 验。
+const TEXT_ICON = 'data:image/png;base64,TEXTICON'
+
+function withCanvas() {
+  globalThis.document = {
+    createElement: () => ({
+      width: 0,
+      height: 0,
+      getContext: () => ({ beginPath() {}, arc() {}, fill() {}, fillText() {} }),
+      toDataURL: () => TEXT_ICON,
+    }),
+  }
+}
+
 afterEach(() => {
   delete globalThis.window
+  delete globalThis.document
 })
 
 test('开启快开的卡片按标题注册一条指令', () => {
   const utools = withUtools(fakeUtools())
+  withCanvas()
 
+  syncQuickFeature({ id: 'w1', title: '文档', url: 'https://doc.example.com/', quick: true, color: '#2792ff' })
+
+  assert.deepEqual(utools.features, [{ code: 'open-link@w1', description: '打开 文档', icon: TEXT_ICON, mainHide: true, cmds: ['文档'] }])
+})
+
+test('快开指令用卡片自己的图片图标，而不是插件 logo', () => {
+  const utools = withUtools(fakeUtools())
+
+  syncQuickFeature({ id: 'w1', title: '文档', url: 'https://doc.example.com/', quick: true, iconType: 'image', iconData: 'data:image/webp;base64,SAVED' })
+
+  assert.equal(utools.features[0].icon, 'data:image/webp;base64,SAVED')
+})
+
+test('实在拿不到图标时回落插件 logo，指令不能没有图标', () => {
+  const utools = withUtools(fakeUtools())
+
+  // 没有画布可用（document 不存在），文字图标画不出来。
   syncQuickFeature({ id: 'w1', title: '文档', url: 'https://doc.example.com/', quick: true })
 
-  assert.deepEqual(utools.features, [{ code: 'open-link@w1', description: '打开 文档', icon: 'logo.png', mainHide: true, cmds: ['文档'] }])
+  assert.equal(utools.features[0].icon, 'logo.png')
 })
 
 test('带 {q} 的卡片多注册一条 over 指令，好让用户接着输关键词', () => {

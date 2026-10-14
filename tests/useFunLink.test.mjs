@@ -32,6 +32,8 @@ class FakeDomParser {
   }
 }
 
+const TEXT_ICON = 'data:image/png;base64,TEXTICON'
+
 function withEnv({ confirm = () => true, utools = {}, funlink, seeded = emptyBackup() } = {}, run) {
   const store = new Map(seeded ? [[STORAGE_KEY, seeded]] : [])
   globalThis.DOMParser = FakeDomParser
@@ -47,7 +49,14 @@ function withEnv({ confirm = () => true, utools = {}, funlink, seeded = emptyBac
     },
     funlink,
   }
-  globalThis.document = { documentElement: { dataset: {} }, createElement: () => ({ click() {} }) }
+  // 用到 document 的有两处：导出备份点的那个 <a download>，以及把文字图标画成
+  // 小图的 <canvas>（主搜索结果的图标只能是图片）。画得对不对由 image.test.mjs 验。
+  globalThis.document = {
+    documentElement: { dataset: {} },
+    createElement: tag => tag === 'canvas'
+      ? { width: 0, height: 0, getContext: () => ({ beginPath() {}, arc() {}, fill() {}, fillText() {} }), toDataURL: () => TEXT_ICON }
+      : { click() {} },
+  }
   const cleanup = () => {
     delete globalThis.window
     delete globalThis.document
@@ -387,6 +396,83 @@ test('setupUtools 对同名卡片取最靠前的一条，选中时不会落空',
     pushHandler({ payload: '同名' })
     selectHandler({ payload: '同名', option: { text: '同名' } })
     assert.deepEqual(opened, ['https://first.example.com/'])
+  })
+})
+
+// 推送结果的图标原先写死成 logo.png，主搜索里所有收藏都长着同一个插件图标，
+// 根本分不出谁是谁。
+test('主搜索推送结果带的是卡片自己的图标', () => {
+  let pushHandler = null
+  withEnv({ utools: { setExpandHeight: () => {}, onMainPush: push => { pushHandler = push } } }, () => {
+    const api = useFunLink()
+    api.saveBookmark({ id: 'w1', title: '图片图标', url: 'https://a.example.com/', iconType: 'image', iconData: 'data:image/webp;base64,SAVED' })
+    api.saveBookmark({ id: 'w2', title: '文字图标', url: 'https://b.example.com/' })
+    api.setupUtools({ addBookmark: () => {} })
+
+    const icons = new Map(pushHandler({ payload: '图标' }).map(result => [result.text, result.icon]))
+    assert.equal(icons.get('图片图标'), 'data:image/webp;base64,SAVED')
+    assert.equal(icons.get('文字图标'), TEXT_ICON, '文字图标要画成一张小图，不能回落成插件 logo')
+  })
+})
+
+const FETCHED_ICON = 'data:image/webp;base64,FETCHED'
+
+// 存量回填一次要写几十上百张图标，既要真的落盘，也要让快开入口跟着变。
+test('applyIcons 把抓来的图标写进卡片并落盘，快开入口的图标跟着换', () => {
+  const features = []
+  let saved = null
+  withEnv({ utools: {
+    dbStorage: {
+      getItem: key => (key === STORAGE_KEY ? emptyBackup() : null),
+      setItem: (key, value) => { saved = value },
+    },
+    // uTools 的 setFeature 按 code 覆盖同名入口，替身也得这样，否则重新注册
+    // 会看成新增一条，看不出图标到底换没换。
+    setFeature: feature => {
+      const index = features.findIndex(item => item.code === feature.code)
+      if (index >= 0) features.splice(index, 1, feature)
+      else features.push(feature)
+    },
+    removeFeature: code => {
+      const index = features.findIndex(feature => feature.code === code)
+      if (index >= 0) features.splice(index, 1)
+      return index >= 0
+    },
+    getFeatures: () => features.slice(),
+  } }, () => {
+    const api = useFunLink()
+    api.saveBookmark({ id: 'w1', title: '文档', url: 'https://doc.example.com/', quick: true })
+    api.saveBookmark({ id: 'w2', title: '面板', url: 'https://panel.example.com/' })
+
+    const ok = api.applyIcons([{ id: 'w1', iconData: FETCHED_ICON }, { id: 'w2', iconData: FETCHED_ICON }])
+
+    assert.equal(ok, true)
+    assert.deepEqual(api.state.value.bookmarks.map(bookmark => [bookmark.iconType, bookmark.iconData]), [['image', FETCHED_ICON], ['image', FETCHED_ICON]])
+    assert.deepEqual(saved.bookmarks.map(bookmark => bookmark.iconData), [FETCHED_ICON, FETCHED_ICON], '要真的写进存储，不能只改内存')
+    assert.deepEqual(features.map(feature => feature.icon), [FETCHED_ICON], '快开入口的图标取自卡片，换了图标得重新注册一遍')
+
+    saved = null
+    assert.equal(api.applyIcons([{ id: 'gone', iconData: FETCHED_ICON }]), true, '卡片已经被删掉的更新直接跳过')
+    assert.equal(saved, null, '没有实际改动就不落盘')
+  })
+})
+
+test('applyIcons 写不进存储时把这一批改回原样', () => {
+  const seeded = { ...emptyBackup(), bookmarks: [{ id: 'w1', title: '文档', url: 'https://doc.example.com/', iconType: 'text', icon: 'WD' }] }
+  withEnv({ utools: { dbStorage: {
+    getItem: key => (key === STORAGE_KEY ? seeded : null),
+    setItem: () => { throw new Error('db is locked') },
+  } } }, () => {
+    const api = useFunLink()
+
+    const ok = api.applyIcons([{ id: 'w1', iconData: FETCHED_ICON }])
+
+    assert.equal(ok, false)
+    const bookmark = api.state.value.bookmarks[0]
+    // 内存和存储不一致的话，后面每次保存都会带着这批图标再撞一次同样的上限。
+    assert.equal(bookmark.iconType, 'text')
+    assert.ok(!bookmark.iconData)
+    assert.equal(api.toast.error, true)
   })
 })
 

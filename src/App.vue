@@ -186,6 +186,7 @@ onBeforeUnmount(() => {
       :categories="state.categories"
       :default-category-id="defaultCategoryId"
       :bookmark-count="state.bookmarks.length"
+      :auto-icon="state.settings.autoIcon"
       @save="funlink.saveBookmark"
     />
     <CategoryDialog ref="categoryDialog" :categories="state.categories" :category-count="funlink.categoryCount" @add="funlink.addCategory" @action="funlink.categoryAction" />
@@ -201,6 +202,7 @@ onBeforeUnmount(() => {
       :settings="state.settings"
       :bookmarks="state.bookmarks"
       :backup-data="state"
+      :backfill="funlink.iconBackfill"
       @save-settings="funlink.saveSettings"
       @clear-cookies="funlink.clearCookies"
       @message="funlink.showToast"

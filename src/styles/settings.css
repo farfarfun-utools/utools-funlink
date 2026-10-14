@@ -30,6 +30,7 @@
 .setting-field h3, .data-field h3, .data-label { margin: 0 0 10px; color: var(--text); font-size: 14px; font-weight: 400; line-height: 21px; }
 .basic-settings > .setting-field:first-child h3 { margin-bottom: 14px; }
 .setting-field h3 small { margin-left: 4px; color: var(--muted); font-size: 12px; font-weight: 400; }
+.setting-help { margin: 8px 0 0; color: var(--muted); font-size: 12px; line-height: 18px; }
 .switch-line { display: flex; align-items: center; gap: 9px; width: fit-content; font-size: 14px; font-weight: 400; cursor: pointer; }
 .switch-line input { position: absolute; opacity: 0; }
 .switch-control { position: relative; width: 40px; height: 20px; flex: 0 0 40px; border-radius: 10px; background: #74c992; transition: background-color .2s; }
@@ -99,10 +100,10 @@
 .webdav-file-list small { color: var(--muted); font-size: 12px; }
 .webdav-file-list button { min-height: 28px; }
 .webdav-empty { height: 120px; display: grid; place-items: center; color: var(--muted); }
-.invalid-links-modal { width: 100vw; max-width: none; height: 100dvh; max-height: none; margin: 0; padding: 24px 26px; border: 0; border-radius: 0; background: var(--surface); color: var(--text); }
-.invalid-links-modal header { height: 40px; display: flex; justify-content: space-between; }
-.invalid-links-modal header .data-button { width: 108px; height: 32px; }
-.invalid-links-modal header > button:last-child { position: fixed; top: 3px; right: 0; width: 54px; height: 54px; color: var(--muted); font-size: 20px; }
+.invalid-links-modal, .icon-fetch-modal { width: 100vw; max-width: none; height: 100dvh; max-height: none; margin: 0; padding: 24px 26px; border: 0; border-radius: 0; background: var(--surface); color: var(--text); }
+.invalid-links-modal header, .icon-fetch-modal header { height: 40px; display: flex; justify-content: space-between; }
+.invalid-links-modal header .data-button, .icon-fetch-modal header .data-button { width: 108px; height: 32px; }
+.invalid-links-modal header > button:last-child, .icon-fetch-modal header > button:last-child { position: fixed; top: 3px; right: 0; width: 54px; height: 54px; color: var(--muted); font-size: 20px; }
 .invalid-tabs { display: flex; height: 40px; border-bottom: 2px solid var(--border); }
 .invalid-tabs button { position: relative; height: 40px; padding: 0; font-size: 14px; font-weight: 500; line-height: 21px; }
 .invalid-tabs button:first-child { padding-right: 20px; }
@@ -111,7 +112,7 @@
 .invalid-tabs button.active::after { content: ''; position: absolute; right: 0; bottom: -2px; left: 0; height: 2px; background: var(--primary); }
 .invalid-tabs button:first-child.active::after { right: 20px; }
 .invalid-tabs button:last-child.active::after { left: 20px; }
-.invalid-summary { height: 38px; margin-top: 16px; padding: 8px 16px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; line-height: 21px; }
+.invalid-summary, .icon-fetch-summary { height: 38px; margin-top: 16px; padding: 8px 16px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; line-height: 21px; }
 .invalid-empty { height: 252px; display: flex; flex-direction: column; align-items: center; margin-top: 12px; padding: 40px 0; color: var(--muted); font-size: 14px; }
 .invalid-empty img { width: 120px; height: auto; }
 .empty-image-light { display: var(--empty-light-display); }
@@ -119,7 +120,12 @@
 .invalid-empty span { margin-top: 20px; }
 .invalid-result-list { max-height: calc(100dvh - 190px); margin-top: 12px; overflow-y: auto; border-top: 1px solid var(--border); font-size: 14px; }
 .invalid-result-list > div { min-height: 42px; display: grid; grid-template-columns: 180px minmax(0, 1fr) 100px 60px; align-items: center; gap: 12px; border-bottom: 1px solid var(--border); }
-.invalid-result-list a { min-width: 0; overflow: hidden; color: var(--text); text-overflow: ellipsis; white-space: nowrap; }
-.invalid-result-list em { color: var(--danger); font-style: normal; }
+.invalid-result-list a, .icon-fetch-list a { min-width: 0; overflow: hidden; color: var(--text); text-overflow: ellipsis; white-space: nowrap; }
+.invalid-result-list em, .icon-fetch-list em { color: var(--danger); font-style: normal; }
 .invalid-summary > span { float: right; color: var(--muted); font-size: 13px; }
+.icon-fetch-note { margin: 10px 0 0; color: var(--muted); font-size: 13px; line-height: 20px; }
+.icon-fetch-option { margin-top: 14px; }
+.icon-fetch-list { max-height: calc(100dvh - 260px); margin-top: 14px; overflow-y: auto; border-top: 1px solid var(--border); font-size: 14px; }
+/* 比失效链接那张表少一个「忽略」按钮列。 */
+.icon-fetch-list > div { min-height: 42px; display: grid; grid-template-columns: 180px minmax(0, 1fr) 120px; align-items: center; gap: 12px; border-bottom: 1px solid var(--border); }
 

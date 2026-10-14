@@ -63,8 +63,8 @@ export function migrateBookmark(bookmark: Record<string, unknown>): Bookmark {
   if (previous.length) next.previousCategoryIds = previous.filter((id): id is string => typeof id === 'string' && Boolean(id))
   delete next.previousCategoryId
 
-  // 旧版把 iconType 默认设成 image 却从不写 iconData——图标是去第三方 favicon 服务现取的。
-  // 现在不再外部取图，这类卡片回落成文字图标，否则会显示成空白圆圈。
+  // 旧版把 iconType 默认设成 image 却从不写 iconData——图标是渲染时去第三方 favicon 服务现取的。
+  // 现在图标一律存在本地（添加时抓一次），这类卡片回落成文字图标，否则会显示成空白圆圈。
   if (next.iconType === 'image' && !next.iconData) next.iconType = 'text'
   return next
 }

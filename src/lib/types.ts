@@ -68,6 +68,8 @@ export interface Settings {
   search: string[]
   importSplit: string
   navbar: NavbarSettings
+  /** 添加卡片时是否访问该网站取它的图标。关掉就只用文字图标或本地图片。 */
+  autoIcon: boolean
 }
 
 export interface AppState {
@@ -123,4 +125,6 @@ export interface FunLinkBridge {
   webdavDelete: (config: WebDavConfig, href: string) => Promise<void>
   /** HEAD 请求探活，返回状态码；网络失败时 reject。 */
   checkUrl: (url: string) => Promise<number>
+  /** 抓取站点自己的图标，返回 data URL；抓不到返回空串，不 reject。 */
+  fetchIcon: (url: string) => Promise<string>
 }

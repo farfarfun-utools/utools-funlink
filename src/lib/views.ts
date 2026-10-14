@@ -1,4 +1,4 @@
-import { bookmarkMatches } from './core'
+import { bookmarkMatches, hasQueryPlaceholder } from './core'
 import { categoryIdsOf } from './state'
 import type { AppState, Bookmark, Category } from './types'
 
@@ -9,6 +9,15 @@ const CATEGORY_PREFIX = 'category:'
 /** 取某个分类的直接子分类。 */
 export function childrenOf(categories: Category[], parentId: string): Category[] {
   return categories.filter(category => category.parentId === parentId)
+}
+
+/**
+ * 一级分类，即顶部导航上的那几项。
+ * 这里按 parentId 为假判断，不写成 childrenOf(categories, '')：旧备份里的分类
+ * 可能压根没有 parentId 字段，严格比 '' 会把它们从导航上漏掉。
+ */
+export function rootCategories(categories: Category[]): Category[] {
+  return categories.filter(category => !category.parentId)
 }
 
 /**
@@ -29,7 +38,8 @@ export function activeRootId(state: AppState): string {
 /** 新建卡片时默认落在哪个分类。 */
 export function defaultCategoryId(state: AppState): string {
   if (state.currentView === 'inbox') return 'cat@default'
-  return state.categories.some(category => category.id === activeCategoryId(state)) ? activeCategoryId(state) : 'cat@default'
+  const categoryId = activeCategoryId(state)
+  return state.categories.some(category => category.id === categoryId) ? categoryId : 'cat@default'
 }
 
 /** 当前视图下的卡片集合，还没应用搜索词。 */
@@ -40,12 +50,18 @@ function viewBookmarks(state: AppState, searching: boolean): Bookmark[] {
   if (searching || state.currentView === 'all') return active
   if (state.currentView === 'favorites') return active.filter(bookmark => bookmark.favorite)
   if (state.currentView === 'quick') return active.filter(bookmark => bookmark.quick)
-  if (state.currentView === 'inbox') return active.filter(bookmark => categoryIdsOf(bookmark).includes('cat@default') || !categoryIdsOf(bookmark).length)
+  if (state.currentView === 'inbox') {
+    return active.filter(bookmark => {
+      const categoryIds = categoryIdsOf(bookmark)
+      return !categoryIds.length || categoryIds.includes('cat@default')
+    })
+  }
   // 停在一级分类上时连它的子分类一起显示，否则刚建完子分类的父分类看起来是空的。
-  const category = state.categories.find(item => item.id === activeCategoryId(state))
+  const categoryId = activeCategoryId(state)
+  const category = state.categories.find(item => item.id === categoryId)
   const ids = category && !category.parentId
     ? new Set([category.id, ...childrenOf(state.categories, category.id).map(item => item.id)])
-    : new Set([activeCategoryId(state)])
+    : new Set([categoryId])
   return active.filter(bookmark => categoryIdsOf(bookmark).some(id => ids.has(id)))
 }
 
@@ -59,6 +75,6 @@ export function visibleBookmarks(state: AppState, search: string): Bookmark[] {
 export function pushableBookmarks(state: AppState, keyword: string, limit = 6): Bookmark[] {
   return state.bookmarks
     // 带 {q} 的卡片得先输关键词，而主搜索框里没法弹对话框，直接排除。
-    .filter(bookmark => !bookmark.deletedAt && !bookmark.url.includes('{q}') && bookmarkMatches(bookmark, keyword, state.settings.search))
+    .filter(bookmark => !bookmark.deletedAt && !hasQueryPlaceholder(bookmark.url) && bookmarkMatches(bookmark, keyword, state.settings.search))
     .slice(0, limit)
 }

@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { initials } from '../lib/core'
-import { displayHost, safeColor } from '../lib/core'
+import { displayHost, initials, safeColor } from '../lib/core'
 import type { Bookmark } from '../lib/types'
 
 const props = withDefaults(defineProps<{ bookmark: Bookmark, trashView?: boolean }>(), { trashView: false })
@@ -35,7 +34,17 @@ const iconImage = computed(() => (props.bookmark.iconType === 'image' ? props.bo
       <img v-if="iconImage" :src="iconImage" alt="" />
       <span v-else :class="{ 'emoji-text': bookmark.icon === '👌' }">{{ bookmark.icon || initials(bookmark.title) }}</span>
     </span>
-    <div class="bookmark-copy">
+    <!-- 整张卡片点哪儿都能打开，但 <article> 不可聚焦，键盘用户只能打开笔记（图标那颗）。
+         标题这块本来就是「这张卡片是什么」的区域，让它兼任打开网址的可聚焦控件；
+         不加 .stop，鼠标点击照样冒泡到 article 走同一条打开链路。 -->
+    <div
+      class="bookmark-copy"
+      role="button"
+      tabindex="0"
+      :aria-label="`打开 ${bookmark.title}`"
+      @keydown.enter="emit('open', bookmark)"
+      @keydown.space.prevent="emit('open', bookmark)"
+    >
       <h2 :title="bookmark.title">{{ bookmark.title }}</h2>
       <p :title="bookmark.description || displayHost(bookmark.url)">
         <i v-if="bookmark.hasNote || bookmark.note" class="iconfont icon-remarks note-mark" aria-hidden="true" />

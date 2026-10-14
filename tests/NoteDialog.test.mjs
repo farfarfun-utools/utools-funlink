@@ -60,6 +60,18 @@ test('改过内容再关闭会带着过滤后的 HTML 保存', async () => {
   assert.equal(content, '<p>改过的</p>')
 })
 
+// 页脚写着「esc 或 ctrl+s 保存」。<dialog> 原生的 Esc 只关窗口，
+// 不拦下来的话按提示操作反而会把刚写的笔记丢掉。
+test('按 esc 和 ctrl+s 一样是保存后关闭', async () => {
+  const wrapper = await openWith('<p>原文</p>')
+  wrapper.find('.note-editor').element.innerHTML = '<p>改过的</p>'
+  await wrapper.find('dialog').trigger('keydown', { key: 'Escape' })
+
+  const [[, content]] = wrapper.emitted('save')
+  assert.equal(content, '<p>改过的</p>')
+  assert.equal(wrapper.find('dialog').element.open, false)
+})
+
 test('空笔记会补一个空段落，光标才有地方落', async () => {
   const wrapper = await openWith('')
 

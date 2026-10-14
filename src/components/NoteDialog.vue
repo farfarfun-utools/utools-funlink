@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { nextTick, ref } from 'vue'
-import { initials } from '../lib/core'
+import { initials, safeColor } from '../lib/core'
 import { sanitizeNoteHtml } from '../lib/sanitize'
-import { safeColor } from '../lib/core'
 import type { Bookmark } from '../lib/types'
 
 const emit = defineEmits(['save'])
@@ -39,7 +38,12 @@ function handleKeydown(event: KeyboardEvent) {
     event.preventDefault()
     close()
   }
-  if (event.key === 'Escape') event.preventDefault()
+  // <dialog> 自带的 Esc 只会把窗口关掉，笔记还没回传就丢了。
+  // 这里拦下原生行为，走和 ctrl+s、点 × 一样的保存后关闭，和页脚提示的「esc 保存」对上。
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    close()
+  }
 }
 
 defineExpose({ open, close })
@@ -63,7 +67,8 @@ defineExpose({ open, close })
       <footer class="note-footer">
         <div class="note-footer-spacer" />
         <div class="note-footer-content">
-          <button type="button" title="暂未开放"><i class="iconfont icon-help" aria-hidden="true" /> 帮助</button>
+          <!-- 功能还没做，点了没反应。标成 disabled，别让它看起来还能点。 -->
+          <button type="button" disabled title="暂未开放"><i class="iconfont icon-help" aria-hidden="true" /> 帮助</button>
           <span class="note-shortcuts"><i /><kbd>/</kbd> 菜单命令 <i /><kbd>esc</kbd> 或 <kbd>ctrl</kbd> + <kbd>s</kbd> 保存</span>
         </div>
       </footer>

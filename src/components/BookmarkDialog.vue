@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
-import { initials, normalizeUrl } from '../lib/core'
+import { initials, isAbsoluteUrl, isHttpUrl, normalizeUrl, safeColor } from '../lib/core'
 import { fetchSiteIcon, toIconDataUrl } from '../lib/image'
-import { safeColor } from '../lib/core'
+import { childrenOf as childrenIn, rootCategories } from '../lib/views'
 import type { BrowserMode, Bookmark, Category } from '../lib/types'
 
 /** 表单的字段都是必填的：空值用 '' / [] 表示，这样模板里不用到处判 undefined。 */
@@ -53,13 +53,13 @@ const form = reactive<BookmarkForm>(blankForm())
 let iconTouched = false
 let handledUrl = ''
 let iconTimer: ReturnType<typeof setTimeout> | null = null
-const roots = computed(() => props.categories.filter(category => !category.parentId))
-const childrenOf = (id: string) => props.categories.filter(category => category.parentId === id)
+const roots = computed(() => rootCategories(props.categories))
+const childrenOf = (id: string) => childrenIn(props.categories, id)
 // 「收集箱」不是真实分类，但在选择器里要能被勾上，所以拼成一个同形状的伪分类。
 const categoryRoots = computed<Category[]>(() => [...roots.value, { id: 'cat@default', name: '收集箱', parentId: '' }])
 const activeCategoryChildren = computed(() => childrenOf(activeCategoryRootId.value))
 // 只有 http(s) 的网址才有网页图标可抓，file / ftp 没有。
-const canFetchIcon = computed(() => /^https?:\/\//i.test(form.url.trim()))
+const canFetchIcon = computed(() => isHttpUrl(form.url))
 const selectedCategories = computed<{ id: string, name: string }[]>(() => form.categoryIds.flatMap(id => {
   if (id === 'cat@default') return [{ id, name: '收集箱' }]
   const category = props.categories.find(item => item.id === id)
@@ -94,7 +94,7 @@ function open(bookmark: Partial<Bookmark> | null = null, insertAfterId: string |
     ? rawUrls.map(item => typeof item === 'string' ? item : String((item as { value?: unknown })?.value ?? ''))
     : []
   form.color = safeColor(form.color)
-  expanded.value = editing.value || /^(https?|ftp|file):\/\//i.test(form.url)
+  expanded.value = editing.value || isAbsoluteUrl(form.url)
   // 编辑已有卡片时把当前网址记成「已处理」：点开弹窗不该把人家原来的图标换掉。
   // 新建时不记，这样从主搜索框带着网址进来的那条路也会自动抓。
   handledUrl = editing.value ? form.url.trim() : ''
@@ -137,7 +137,7 @@ async function fetchIcon(url: string, { force = false } = {}) {
 /** 手动抓图标：自动抓取关着、抓过没抓到、或者想换一张时用。 */
 async function fetchIconNow() {
   const url = form.url.trim()
-  if (fetchingIcon.value || !/^https?:\/\//i.test(url)) return
+  if (fetchingIcon.value || !isHttpUrl(url)) return
   // 定时器还挂着的话等会儿又抓一次，这次手动的就白点了。
   stopIconFetch()
   await fetchIcon(url, { force: true })
@@ -156,7 +156,7 @@ function scheduleIconFetch() {
   const url = form.url.trim()
   // 只抓 http(s)：file / ftp 没有网页图标可读。地址没填全（协议都还没敲完）时
   // 界面还是骨架屏，这时去抓只会抓到一堆 404。
-  if (!/^https?:\/\//i.test(url) || url === handledUrl) return
+  if (!isHttpUrl(url) || url === handledUrl) return
   iconTimer = setTimeout(() => {
     iconTimer = null
     fetchIcon(url)
@@ -294,7 +294,7 @@ function clearCategories() {
 }
 
 watch(() => form.url, value => {
-  expanded.value = editing.value || /^(https?|ftp|file):\/\//i.test(String(value || '').trim())
+  expanded.value = editing.value || isAbsoluteUrl(value)
   if (expanded.value && !form.title && editing.value) form.title = ''
   error.value = ''
   scheduleIconFetch()

@@ -17,6 +17,36 @@ export function normalizeUrl(value: unknown): string {
   return url.href
 }
 
+// 站内搜索占位符。卡片网址里写上它，打开时换成用户输入的关键词。
+// 判断、填充、去掉这三件事散在打开链路、抓图标、主搜索推送、AI 工具里一共七处，
+// 字面量各写一遍的话，改规则就得同时记住七个地方。
+export const QUERY_PLACEHOLDER = '{q}'
+
+/** 是否是站内搜索类网址。这类卡片打开前必须先拿到关键词。 */
+export function hasQueryPlaceholder(url: unknown): boolean {
+  return String(url || '').includes(QUERY_PLACEHOLDER)
+}
+
+/** 把占位符换成关键词。关键词要 URL 编码，否则空格和中文会把地址截断。 */
+export function fillQueryPlaceholder(url: string, keyword: string): string {
+  return url.replaceAll(QUERY_PLACEHOLDER, encodeURIComponent(keyword))
+}
+
+/** 去掉占位符，得到一个还能请求的地址：站点首页和 /favicon.ico 兜底都还在。 */
+export function stripQueryPlaceholder(url: string): string {
+  return url.replaceAll(QUERY_PLACEHOLDER, '')
+}
+
+/** 是不是 http(s) 网址。只有这类才有网页图标可抓、才能发请求探活，file / ftp 没有。 */
+export function isHttpUrl(value: unknown): boolean {
+  return /^https?:\/\//i.test(String(value || '').trim())
+}
+
+/** 协议已经写全了的网址。没到这一步时，编辑卡片的预览区保持骨架屏。 */
+export function isAbsoluteUrl(value: unknown): boolean {
+  return /^(https?|ftp|file):\/\//i.test(String(value || '').trim())
+}
+
 /** 判断书签是否匹配搜索词。 */
 export function bookmarkMatches(bookmark: Record<string, unknown>, keyword: unknown, fields: string[] = ['title', 'description', 'url']): boolean {
   const query = String(keyword || '').trim().toLocaleLowerCase()
@@ -177,6 +207,13 @@ export function originOf(url: string): string {
 export function displayHost(url: string): string {
   try { return new URL(url).hostname || url } catch { return url }
 }
+
+/**
+ * 文字图标的轮换底色。
+ * 导入浏览器书签和迁移「网址精灵」备份两条链路都用它：各存一份的话，
+ * 同一批数据从不同入口进来颜色就不一样了。
+ */
+export const IMPORT_COLORS = ['#16b8c7', '#2563eb', '#7c3aed', '#db2777', '#e85d3f', '#0f9f6e', '#64748b']
 
 /** 校验颜色值，非法值回退到默认颜色。 */
 export function safeColor(value: unknown): string {

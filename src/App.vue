@@ -27,11 +27,13 @@ const draggedBookmarkId = ref<string | null>(null)
 // bookmark 必须显式标成 Bookmark | null：写成 reactive({ bookmark: null }) 的话
 // 类型会被推成 null，contextItems 里对它的字段访问就全都逃过了类型检查。
 const context = reactive<{ visible: boolean, type: string, bookmark: Bookmark | null, x: number, y: number }>({ visible: false, type: '', bookmark: null, x: 0, y: 0 })
+// help 是这四个视图各自的一句说明。它们不像普通分类那样是用户自己建的，
+// 卡片凭什么出现在这里全靠这句话解释。
 const specialView = computed(() => ({
-  inbox: { label: '收集箱', icon: 'icon-inbox' },
-  favorites: { label: '常用', icon: 'icon-card' },
-  quick: { label: '网页快开', icon: 'icon-fly' },
-  trash: { label: '废纸篓', icon: 'icon-dust' },
+  inbox: { label: '收集箱', icon: 'icon-inbox', help: '没有指定分类的卡片都先落在这里' },
+  favorites: { label: '常用', icon: 'icon-card', help: '右键卡片「加入常用」的都会出现在这里' },
+  quick: { label: '网页快开', icon: 'icon-fly', help: '在 uTools 主搜索框直接输入卡片名称就能打开' },
+  trash: { label: '废纸篓', icon: 'icon-dust', help: '移除的卡片暂存在这里，右键左下角图标可清空' },
 }[state.value.currentView] || null))
 
 const contextItems = computed(() => {
@@ -147,7 +149,8 @@ onBeforeUnmount(() => {
       <div class="main-view">
         <div v-if="specialView" class="special-view-header">
           <span class="special-view-title" :class="{ danger: state.currentView === 'trash' }"><i class="iconfont" :class="specialView.icon" aria-hidden="true" />{{ specialView.label }}</span>
-          <button type="button" aria-label="帮助" title="帮助"><i class="iconfont icon-help" aria-hidden="true" /></button>
+          <!-- 原来这里是个点了没反应的「帮助」按钮，换成直接把说明写出来。 -->
+          <p class="special-view-help"><i class="iconfont icon-help" aria-hidden="true" />{{ specialView.help }}</p>
         </div>
         <div class="detail-content" :class="secondaryCategories.length ? `tabs-${secondaryPosition}` : ''">
           <SecondaryNavigation

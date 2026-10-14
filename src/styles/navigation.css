@@ -65,8 +65,9 @@
 .special-view-title { height: 36px; display: flex; align-items: center; padding: 6px 16px; border-radius: 20px; background: var(--surface); box-shadow: 0 1px 2px rgb(0 0 0 / 5%); color: var(--text); font-size: 16px; line-height: 24px; }
 .special-view-title .iconfont { margin-right: 9px; color: var(--primary); font-size: 18px; }
 .special-view-title.danger .iconfont { color: var(--danger); }
-.special-view-header > button { width: 16px; height: 24px; display: grid; place-items: center; margin-left: auto; color: var(--muted); }
-.special-view-header > button .iconfont { font-size: 14px; }
+/* 视图说明贴在标题右边，窄窗口下先让它省略而不是把标题挤走。 */
+.special-view-help { min-width: 0; margin: 0 0 0 12px; overflow: hidden; color: var(--muted); font-size: 12px; line-height: 36px; white-space: nowrap; text-overflow: ellipsis; }
+.special-view-help .iconfont { margin-right: 5px; font-size: 14px; vertical-align: -1px; }
 
 .secondary-nav { position: relative; flex: 0 0 auto; }
 .secondary-nav.is-left, .secondary-nav.is-right { width: 72px; }

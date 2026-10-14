@@ -6,7 +6,7 @@
 // 几百个网站之后一次性写入失败，整轮白跑。所以这里一边抓一边算还剩多少额度，
 // 装不下下一张就停，并且每抓够一批就落盘一次。
 
-import { originOf } from './core'
+import { isHttpUrl, originOf, stripQueryPlaceholder } from './core'
 import { MAX_DOC_BYTES } from './storage'
 import type { Bookmark } from './types'
 
@@ -97,7 +97,7 @@ export function iconBackfillCandidates(bookmarks: Bookmark[], { includeExisting 
     if (bookmark.deletedAt) return []
     const url = String(bookmark.url || '').trim()
     // 只抓 http(s)：file / ftp 没有网页图标可读。
-    if (!/^https?:\/\//i.test(url)) return []
+    if (!isHttpUrl(url)) return []
     const iconData = bookmark.iconType === 'image' ? String(bookmark.iconData || '') : ''
     if (iconData && !includeExisting) return []
     return [{
@@ -106,7 +106,7 @@ export function iconBackfillCandidates(bookmarks: Bookmark[], { includeExisting 
       url,
       // 搜索类网址带着 {q} 占位符，原样请求是个无意义的地址；
       // 去掉占位符后站点首页和 /favicon.ico 兜底都还在。
-      requestUrl: url.replaceAll('{q}', ''),
+      requestUrl: stripQueryPlaceholder(url),
       existingBytes: iconCost(iconData),
     }]
   })

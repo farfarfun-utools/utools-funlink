@@ -4,6 +4,9 @@ html { background: var(--bg); }
 body { margin: 0; min-width: 320px; color: var(--text); background: var(--bg); }
 button, input, select, textarea { margin: 0; font: inherit; letter-spacing: 0; color: inherit; }
 button { padding: 0; border: 0; background: transparent; cursor: pointer; }
-button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+/* 带 role="button" 的 span / div 也要有焦点框：卡片的图标和标题都是这种，
+   漏掉的话键盘走到哪儿完全看不出来。 */
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible,
+[role='button']:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 

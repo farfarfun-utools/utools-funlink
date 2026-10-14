@@ -12,6 +12,23 @@ export const DEFAULT_SETTINGS: Settings = {
   autoIcon: true,
 }
 
+/**
+ * 一份全新的默认设置。
+ *
+ * 嵌套的 browser / navbar / search 必须跟着一起拷：直接摊平 DEFAULT_SETTINGS 的话，
+ * 这几个子对象还是同一个引用，用户在设置里调一下窗口尺寸就把模块级的默认值
+ * 一起改掉了，下次「重置」出来的还是改过的值。
+ * 原来写的是 JSON.parse(JSON.stringify(...))，绕一圈字符串还把类型擦成 any。
+ */
+export function defaultSettings(): Settings {
+  return {
+    ...DEFAULT_SETTINGS,
+    browser: { ...DEFAULT_SETTINGS.browser },
+    navbar: { ...DEFAULT_SETTINGS.navbar },
+    search: DEFAULT_SETTINGS.search.slice(),
+  }
+}
+
 /** 读取书签的兼容分类 ID 列表。 */
 export function categoryIdsOf(bookmark: Bookmark): string[] {
   return bookmark.categoryIds || (bookmark.categoryId ? [bookmark.categoryId] : [])
@@ -24,7 +41,7 @@ export function emptyState(): AppState {
     theme: 'system',
     currentView: 'inbox',
     lastCategoryId: '',
-    settings: JSON.parse(JSON.stringify(DEFAULT_SETTINGS)),
+    settings: defaultSettings(),
     categories: [],
     bookmarks: [],
   }

@@ -77,6 +77,18 @@ test('点图标打开笔记，点卡片其他区域打开网址', async () => {
   assert.deepEqual(wrapper.emitted('open'), [[bookmark]])
 })
 
+// <article> 不可聚焦，只给图标挂 tabindex 的话键盘用户只能打开笔记、打不开网址。
+test('键盘走到标题区回车或空格都能打开网址', async () => {
+  const bookmark = { id: 'web_1', title: '示例', url: 'https://example.com' }
+  const wrapper = mount(BookmarkCard, { props: { bookmark } })
+  const copy = wrapper.find('.bookmark-copy')
+
+  assert.equal(copy.attributes('tabindex'), '0')
+  await copy.trigger('keydown', { key: 'Enter' })
+  await copy.trigger('keydown', { key: ' ' })
+  assert.deepEqual(wrapper.emitted('open'), [[bookmark], [bookmark]])
+})
+
 test('废纸篓视图里的卡片不能拖动', () => {
   const wrapper = mount(BookmarkCard, { props: { bookmark: { id: 'web_1', title: '示例', url: 'https://example.com' }, trashView: true } })
 

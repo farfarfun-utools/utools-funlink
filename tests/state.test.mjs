@@ -1,6 +1,6 @@
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { STORAGE_KEY, loadState, prepareState } from '../src/lib/state.ts'
+import { DEFAULT_SETTINGS, STORAGE_KEY, emptyState, loadState, prepareState } from '../src/lib/state.ts'
 
 // 重构前（commit 6b8331a）真实的存档形状：同样的 key、同样的 version 1，
 // 但卡片只有 categoryId，废纸篓项只有 previousCategoryId。
@@ -50,6 +50,20 @@ test('unreadable data blocks writes rather than overwriting', () => {
 
 test('storage key stays the one earlier versions wrote to', () => {
   assert.equal(STORAGE_KEY, 'funlink-state-v1')
+})
+
+test('空状态的设置是独立一份，改它不会动到默认值', () => {
+  const first = emptyState()
+  first.settings.browser.width = 1234
+  first.settings.search.push('note')
+  first.settings.navbar.rounded = 0
+
+  assert.equal(DEFAULT_SETTINGS.browser.width, 1000, '模块级默认值不能被改掉')
+  assert.deepEqual(DEFAULT_SETTINGS.search, ['title', 'description', 'url'])
+  assert.equal(DEFAULT_SETTINGS.navbar.rounded, 36)
+  // 「重置」会再要一份空状态，拿到的必须是原始默认值。
+  assert.equal(emptyState().settings.browser.width, 1000)
+  assert.deepEqual(emptyState().settings.search, ['title', 'description', 'url'])
 })
 
 test('prepareState reports skipped unsafe cards', () => {

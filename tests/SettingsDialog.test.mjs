@@ -27,7 +27,8 @@ function settings() {
 function fakeBackfill(overrides = {}) {
   const backfill = {
     running: false, finished: false, includeExisting: false,
-    done: 0, filled: 0, failed: 0, failures: [],
+    done: 0, total: 0, filled: 0, failed: 0, failures: [], percent: 0,
+    message: '', messageError: false,
     candidates: [], storageBytes: 0, capacity: 0,
     calls: { start: 0, stop: 0 },
     start: () => { backfill.calls.start += 1 },
@@ -46,6 +47,15 @@ async function openDataTab(wrapper) {
   wrapper.vm.open()
   await nextTick()
   await wrapper.findAll('.settings-tabs button')[1].trigger('click')
+  return wrapper
+}
+
+// 两个子弹窗里的统计要整库扫一遍（链接检查数数、抓图标要算体积），
+// 所以内容只在打开后才渲染，测试里也得先点开入口按钮。
+async function openSubDialog(wrapper, entry) {
+  await openDataTab(wrapper)
+  await wrapper.find(entry).trigger('click')
+  await nextTick()
   return wrapper
 }
 
@@ -259,9 +269,7 @@ test('扫描把 4xx 和请求失败都算成无效链接', async () => {
       return 200
     },
   }
-  const wrapper = mountDialog({ bookmarks })
-  wrapper.vm.open()
-  await nextTick()
+  const wrapper = await openSubDialog(mountDialog({ bookmarks }), '.invalid-links-entry')
 
   // 废纸篓里的卡片和带 {q} 的站内搜索网址不参与扫描。
   assert.match(wrapper.find('.invalid-summary').text(), /共需检查 3 条链接/)
@@ -280,9 +288,7 @@ test('扫描可以中途停止，停掉之后在飞的结果不再入列', async
   const pending = []
   const bookmarks = Array.from({ length: 12 }, (unused, index) => ({ id: `web_${index}`, title: `站点${index}`, url: `https://s${index}.example.com` }))
   window.funlink = { checkUrl: () => new Promise(resolve => { pending.push(resolve) }) }
-  const wrapper = mountDialog({ bookmarks })
-  wrapper.vm.open()
-  await nextTick()
+  const wrapper = await openSubDialog(mountDialog({ bookmarks }), '.invalid-links-entry')
   const scanButton = () => wrapper.find('.invalid-links-modal header .data-button')
 
   await scanButton().trigger('click')
@@ -315,22 +321,73 @@ test('批量抓图标的摘要里有待抓张数、当前体积和剩余可存�
   assert.match(summary, /剩余空间约够放 170 张/)
 })
 
+// 算整库体积要把整个存档序列化一遍。本组件一直挂在 App 上，模板里只要碰一下
+// storageBytes，每改一张卡片就会连带多序列化一次整库。
+test('抓图标弹窗没打开时不去算整库体积', async () => {
+  const backfill = fakeBackfill()
+  let reads = 0
+  Object.defineProperty(backfill, 'storageBytes', { get: () => { reads += 1; return 0 } })
+  const wrapper = mountDialog({ backfill })
+  // @vue/test-utils 挂载时会把每个 prop 的值遍历一遍找 ref，这一次读不是组件行为。
+  const atMount = reads
+  await openDataTab(wrapper)
+
+  assert.equal(reads, atMount, '设置抽屉打开着也不该去算')
+
+  await wrapper.find('.icon-fetch-entry').trigger('click')
+  assert.ok(reads > atMount, '打开弹窗之后才需要这个数字')
+})
+
 test('开始/停止按钮跟着 running 切换，点下去就调到 backfill 上', async () => {
   const idle = fakeBackfill({ candidates: [{ id: 'web_1' }] })
-  const wrapper = await openDataTab(mountDialog({ backfill: idle }))
+  const wrapper = await openSubDialog(mountDialog({ backfill: idle }), '.icon-fetch-entry')
   const button = () => wrapper.find('.icon-fetch-modal header .data-button')
 
   assert.equal(button().text(), '开始抓取')
   await button().trigger('click')
   assert.deepEqual(idle.calls, { start: 1, stop: 0 })
 
-  const running = fakeBackfill({ running: true, candidates: [{ id: 'web_1' }], done: 3, filled: 2 })
+  const running = fakeBackfill({ running: true, candidates: [{ id: 'web_1' }], done: 3, total: 8, filled: 2, failed: 1, percent: 38 })
   await wrapper.setProps({ backfill: running })
   assert.equal(button().text(), '停止抓取')
-  assert.match(wrapper.find('.icon-fetch-summary').text(), /已处理 3 \/ 1 张，抓到 2 张/)
+  assert.match(wrapper.find('.icon-fetch-summary').text(), /已处理 3 \/ 8 张，抓到 2 张，失败 1 张/)
 
   await button().trigger('click')
   assert.deepEqual(running.calls, { start: 0, stop: 1 })
+})
+
+// 一张图标要访问一个站点，几百张能跑几分钟。只有数字的话第一张抓完之前界面是
+// 静止的，用户的反馈就是「点了没反应」。
+test('跑起来之后有进度条，第一张还没抓完时也看得出在动', async () => {
+  const backfill = fakeBackfill({ running: true, candidates: [{ id: 'web_1' }], total: 50, done: 0, percent: 0 })
+  const wrapper = await openSubDialog(mountDialog({ backfill }), '.icon-fetch-entry')
+  const bar = () => wrapper.find('.icon-fetch-progress')
+
+  assert.ok(bar().exists())
+  assert.ok(bar().classes('waiting'), '还没有一张处理完，进度条要用动画表示在跑')
+  assert.equal(bar().find('div').attributes('style'), undefined, '0% 的宽度会盖掉动画，这时不要内联宽度')
+
+  await wrapper.setProps({ backfill: fakeBackfill({ running: true, total: 50, done: 20, percent: 40 }) })
+  assert.equal(bar().classes('waiting'), false)
+  assert.match(bar().find('div').attributes('style'), /width:\s*40%/)
+  assert.equal(bar().attributes('aria-valuenow'), '40')
+})
+
+// 对话框是 showModal 开的，顶层之下的 toast 会被它盖住，所以提示必须进对话框。
+test('抓不动的原因写在对话框里，而不是只发一条看不见的 toast', async () => {
+  const backfill = fakeBackfill({ message: '当前环境不支持抓取图标，请在 uTools 里操作', messageError: true })
+  const wrapper = await openSubDialog(mountDialog({ backfill }), '.icon-fetch-entry')
+
+  const line = wrapper.find('.icon-fetch-message')
+  assert.equal(line.text(), '当前环境不支持抓取图标，请在 uTools 里操作')
+  assert.ok(line.classes('error'))
+})
+
+test('一张都不用抓时摘要直接说清楚，不留个按不动的按钮让人猜', async () => {
+  const wrapper = await openSubDialog(mountDialog({ backfill: fakeBackfill({ storageBytes: 1024 }) }), '.icon-fetch-entry')
+
+  assert.match(wrapper.find('.icon-fetch-summary').text(), /没有需要抓图标的卡片/)
+  assert.equal(wrapper.find('.icon-fetch-modal header .data-button').attributes('disabled'), '')
 })
 
 test('抓不到图标的网站列出来，关掉对话框就停掉在跑的抓取', async () => {
@@ -354,9 +411,7 @@ test('抓不到图标的网站列出来，关掉对话框就停掉在跑的抓�
 test('忽略链接后它不再参与扫描，并且写进了存储', async () => {
   const bookmarks = [{ id: 'web_1', title: '不存在', url: 'https://missing.example.com' }]
   window.funlink = { checkUrl: async () => 404 }
-  const wrapper = mountDialog({ bookmarks })
-  wrapper.vm.open()
-  await nextTick()
+  const wrapper = await openSubDialog(mountDialog({ bookmarks }), '.invalid-links-entry')
   await wrapper.find('.invalid-links-modal header .data-button').trigger('click')
   await nextTick()
 

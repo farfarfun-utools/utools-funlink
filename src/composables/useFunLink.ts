@@ -1,5 +1,5 @@
 import { computed, ref } from 'vue'
-import { createId, displayHost, initials, isSafeUrl, moveCategory, moveItem, normalizeCategoryIds, originOf, parseBookmarkHtml, splitTitle } from '../lib/core'
+import { IMPORT_COLORS, createId, displayHost, fillQueryPlaceholder, hasQueryPlaceholder, initials, isSafeUrl, moveCategory, moveItem, normalizeCategoryIds, originOf, parseBookmarkHtml, splitTitle } from '../lib/core'
 import { removeQuickFeature, resetQuickFeatures, syncQuickFeature } from '../lib/features'
 import { STORAGE_KEY, categoryIdsOf, loadState, prepareState } from '../lib/state'
 import { convertLegacyExport, isLegacyExport } from '../lib/legacy'
@@ -14,8 +14,6 @@ import { useToast } from './useToast'
 import { setupUtoolsHost } from './useUtoolsHost'
 
 export { PLUGIN_HEIGHT } from './useUtoolsHost'
-
-const COLORS = ['#16b8c7', '#2563eb', '#7c3aed', '#db2777', '#e85d3f', '#0f9f6e', '#64748b']
 
 // 示例数据本身就是「网址精灵」的文档格式，直接复用导入用的转换器，
 // 免得示例数据和真实导入走两套映射、行为不一致。
@@ -38,7 +36,7 @@ export function useFunLink() {
   let lastSavedJson = ''
 
   const childrenOf = (parentId: string): Category[] => views.childrenOf(state.value.categories, parentId)
-  const roots = computed(() => state.value.categories.filter(category => !category.parentId))
+  const roots = computed(() => views.rootCategories(state.value.categories))
   const activeCategoryId = computed(() => views.activeCategoryId(state.value))
   const activeRootId = computed(() => views.activeRootId(state.value))
   const secondaryCategories = computed(() => state.value.currentView.startsWith('category:') && activeRootId.value ? childrenOf(activeRootId.value) : [])
@@ -156,11 +154,11 @@ export function useFunLink() {
     const urls = urlsOf(bookmark)
     if (!urls.length) return
     let keyword = String(query || '').trim() || search.value.trim()
-    if (urls.some(url => url.includes('{q}')) && !keyword) {
+    if (urls.some(hasQueryPlaceholder) && !keyword) {
       keyword = await askKeyword(`在 ${bookmark.title} 中搜索`)
       if (!keyword) return
     }
-    urls.forEach(url => openUrl(bookmark, url.replaceAll('{q}', encodeURIComponent(keyword))))
+    urls.forEach(url => openUrl(bookmark, fillQueryPlaceholder(url, keyword)))
   }
 
   function toggleFavorite(bookmark: Bookmark) {
@@ -211,8 +209,20 @@ export function useFunLink() {
     saveState()
   }
 
+  // 分类管理里每个分类都要显示自己的卡片数。原来是每个分类各把整库过一遍，
+  // 开销等于分类数乘卡片数；这里过一遍就把所有分类的数都数出来。
+  const categoryCounts = computed(() => {
+    const counts = new Map<string, number>()
+    state.value.bookmarks.forEach(bookmark => {
+      if (bookmark.deletedAt) return
+      // categoryIds 在读取和保存时都经过 normalizeCategoryIds 去重，同一个分类不会数两遍。
+      categoryIdsOf(bookmark).forEach(id => counts.set(id, (counts.get(id) || 0) + 1))
+    })
+    return counts
+  })
+
   function categoryCount(categoryId: string) {
-    return state.value.bookmarks.filter(bookmark => !bookmark.deletedAt && categoryIdsOf(bookmark).includes(categoryId)).length
+    return categoryCounts.value.get(categoryId) || 0
   }
 
   function addCategory(name: string, parentId: string, afterId = '') {
@@ -337,7 +347,7 @@ export function useFunLink() {
         description: description || displayHost(bookmark.url),
         categoryId,
         categoryIds: [categoryId],
-        color: COLORS[index % COLORS.length],
+        color: IMPORT_COLORS[index % IMPORT_COLORS.length],
         iconType: 'text',
         icon: initials(title || bookmark.title),
         urls: [],

@@ -57,6 +57,10 @@ export default [
       'vue/html-self-closing': 'off',
       'eqeqeq': ['error', 'always', { null: 'ignore' }],
       'no-console': ['warn', { allow: ['warn', 'error'] }],
+      // 同一个模块被 import 两次没人看得出来，但确实发生过（NoteDialog、BookmarkDialog
+      // 都从 lib/core 导了两行）。这条规则只看模块路径、不区分 import type，
+      // 所以既要取值又要取类型时请写成行内的 `type X`，别拆成两条。
+      'no-duplicate-imports': 'error',
     },
   },
 ]

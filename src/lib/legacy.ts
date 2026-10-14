@@ -1,4 +1,4 @@
-import { initials, isSafeUrl } from './core'
+import { IMPORT_COLORS, initials, isSafeUrl } from './core'
 import { DEFAULT_SETTINGS } from './state'
 import type { AppState, Bookmark, Category, Settings } from './types'
 
@@ -13,7 +13,6 @@ import type { AppState, Bookmark, Category, Settings } from './types'
 //   设置   { _id: 'setting', value: {...} }
 //   排序   { _id: 'sort_cat@category' | 'sort_web@<catId>', value: [...] }
 //   其它   cookie@... 等，直接忽略
-const COLORS = ['#16b8c7', '#2563eb', '#7c3aed', '#db2777', '#e85d3f', '#0f9f6e', '#64748b']
 // cat@dustbin / cat@fly / cat@often 是状态标记而非真实分类，只有 cat@default（收集箱）要保留。
 const MARKER_CATEGORY_IDS = new Set(['cat@dustbin', 'cat@fly', 'cat@often'])
 const SPECIAL_CATEGORY_IDS = new Set(['cat@default', ...MARKER_CATEGORY_IDS])
@@ -135,7 +134,7 @@ export function convertLegacyExport(raw: unknown): { state: AppState, dropped: n
       description: doc.desc || '',
       categoryId: own[0] || 'cat@default',
       categoryIds: own.length ? own : ['cat@default'],
-      color: icon.textColor || COLORS[index % COLORS.length],
+      color: icon.textColor || IMPORT_COLORS[index % IMPORT_COLORS.length],
       iconType: hasImage ? 'image' : 'text',
       icon: icon.text || initials(title),
       iconSize: icon.fontSize || 16,

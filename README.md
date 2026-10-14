@@ -1,3 +1,5 @@
+<p align="center"><img src="utools/logo.png" alt="FunLink" width="88"></p>
+
 # FunLink
 
 FunLink 是一个面向 uTools 的网址收藏与快速访问插件。它把零散书签整理成清晰的网址导航，并将收藏、搜索和打开网页串联到 uTools 主搜索框中，适合管理工作入口、开发文档、设计素材和常用在线工具。

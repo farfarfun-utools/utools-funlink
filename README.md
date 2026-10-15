@@ -1,8 +1,8 @@
-<p align="center"><img src="utools/logo.png" alt="FunLink" width="88"></p>
-
 # FunLink
 
 FunLink 是一个面向 uTools 的网址收藏与快速访问插件。它把零散书签整理成清晰的网址导航，并将收藏、搜索和打开网页串联到 uTools 主搜索框中，适合管理工作入口、开发文档、设计素材和常用在线工具。
+
+<p align="center"><img src="utools/logo.png" alt="FunLink" width="88"></p>
 
 插件无需账号或独立服务端，数据保存在 uTools `dbStorage` 中。项目使用 Vue 3、Composition API 和 Vite 构建，并通过独立组件与 composable 组织界面和业务状态。
 
@@ -130,12 +130,12 @@ FunLink 的产品思路和主要交互参考了 uTools 插件 [网址精灵](htt
 
 ---
 
-## 关于 farfarfun
+## 关于 farfarfun-utools
 
-[farfarfun](https://github.com/farfarfun) 是一个专注于实用工具库的开源组织，
-涵盖云存储、数据处理、AI、多媒体与开发工具链等方向。
+[farfarfun](https://github.com/farfarfun) 的 uTools 插件产品线：本地优先、集成 uTools
+主搜索框、统一 Vue 3 + Vite 技术栈。
 
-- 🏠 组织主页：<https://github.com/farfarfun>
+- 🏠 组织主页：<https://github.com/farfarfun-utools>
 - 📧 联系：farfarfun@qq.com
 
 本项目基于 [MIT](LICENSE) 协议开源。

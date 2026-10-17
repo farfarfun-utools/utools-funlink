@@ -20,6 +20,9 @@ const config: UserConfig & { test: Record<string, unknown> } = {
     // 单测默认跑在 node 下，要 DOM 的文件自己在首行写 `// @vitest-environment jsdom`：
     // 挂一个 jsdom 比跑 node 慢一个量级，纯逻辑的那十几个文件没必要跟着付这份钱。
     include: ['tests/**/*.test.mjs'],
+    // 只做一件事：把 jsdom 的 localStorage 补回 globalThis，原因见文件里的注释。
+    // node 环境的用例里它是空操作。
+    setupFiles: ['tests/setup.mjs'],
     coverage: {
       // 没被任何测试碰到的文件也要算进来，否则漏掉一整个模块反倒显示成高覆盖率。
       all: true,

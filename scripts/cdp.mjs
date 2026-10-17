@@ -171,6 +171,8 @@ class Session {
 export async function launch({ url, binary = findBrowser(), headless = true, downloadPath } = {}) {
   if (!binary) throw new Error('找不到 Chromium 系浏览器');
 
+  // 前缀不带插件名：这个文件由 build-scripts.mjs 分发到四个仓库，带名字的话每个仓库
+  // 都会想改成自己的名字，然后四份就各走各的了。
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'utools-cdp-'));
 
   /**

@@ -44,6 +44,12 @@ export default [
     },
   },
   {
+    // 截图脚本跑在 Node 里，靠 stdout 汇报进度。
+    files: ['scripts/**/*.mjs'],
+    languageOptions: { globals: globals.node },
+    rules: { 'no-console': 'off' },
+  },
+  {
     rules: {
       // 项目里刻意用了不少 `?.` 可选调用来兼容「浏览器预览时没有 utools」，
       // 这些地方的空值检查是有意为之，不按未使用变量/表达式处理。

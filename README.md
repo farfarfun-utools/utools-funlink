@@ -15,7 +15,7 @@ FunLink 是一个面向 uTools 的网址收藏与快速访问插件。它把零�
 | <img src="docs/screenshots/settings.png" alt="设置"> | <img src="docs/screenshots/dark.png" alt="深色主题"> |
 | WebDav / 本地备份还原，以及浏览器书签导入 | 浅色 / 深色 / 跟随系统 |
 
-> 图里的收藏都是为截图造的演示数据。
+> 图由 `pnpm screenshots` 生成，收藏都是为截图造的演示数据。
 
 ## 主要功能
 
@@ -99,6 +99,7 @@ WebDav 备份/还原、「检查无效链接」，后三项都要用户显式触
 ```bash
 pnpm install
 pnpm dev
+pnpm screenshots   # 重新生成 README 里的截图，没装 Chrome 会跳过
 ```
 
 访问终端输出的本地地址。浏览器预览使用 `localStorage`，在 uTools 中运行时自动切换为 `dbStorage`。

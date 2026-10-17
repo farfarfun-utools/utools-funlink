@@ -11,12 +11,20 @@ command -v pnpm >/dev/null || { echo "error: pnpm is required (corepack enable)"
 echo "=== install dependencies ==="
 pnpm install --frozen-lockfile
 
-echo "=== check source ==="
-pnpm lint
-pnpm typecheck
+# CI 把 lint / typecheck / test 拆成了独立步骤（哪一步红的一眼就能看出来），
+# 再在这里跑一遍就是白等一倍时间。本地直接 ./build.sh 时默认全跑：
+# 一条命令就该把该查的都查完。
+if [ "${SKIP_CHECKS:-0}" = "1" ]; then
+  echo "=== SKIP_CHECKS=1: 跳过 lint / typecheck / test ==="
+else
+  echo "=== check source ==="
+  pnpm lint
+  pnpm typecheck
 
-echo "=== test source ==="
-pnpm test
+  echo "=== test source ==="
+  pnpm test
+fi
+
 node --check "$PLUGIN_DIR/preload.js"
 node -e "JSON.parse(require('fs').readFileSync('$PLUGIN_DIR/plugin.json', 'utf8'))"
 

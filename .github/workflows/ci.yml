@@ -50,18 +50,15 @@ jobs:
       - name: Test
         run: pnpm test
 
-      - name: Build
-        run: pnpm build
-
-      # preload.js 跑在 uTools 的 Node 环境里，不经过 Vite，所以单独做语法检查；
-      # plugin.json 写坏了插件直接装不上，这里也过一遍解析。
-      - name: Verify plugin package
-        run: |
-          node --check utools/preload.js
-          node -e "JSON.parse(require('fs').readFileSync('utools/plugin.json', 'utf8'))"
-          test -f utools/dist/index.html
-          test -f utools/logo.png
-          test -f utools/search.png
+      # 跑 build.sh 而不是 pnpm build：发版那趟用的是同一个脚本，CI 不跑它的话，
+      # 脚本本身坏了要等到打 tag 才知道。它在构建前后会校验 preload.js 的语法
+      # （那个文件跑在 uTools 的 Node 环境里、不经过 Vite）、plugin.json 能不能解析、
+      # 以及产物是否齐全 —— 原来这些在下面手抄了一份，两份清单只会慢慢对不上。
+      # 上面三步已经跑过检查了，这里跳过，省掉一整轮重复的 lint / typecheck / test。
+      - name: Build plugin
+        run: ./build.sh
+        env:
+          SKIP_CHECKS: '1'
 
       # 只在下限那个版本上传一份就够了。注意这个条件要跟着矩阵改：之前写的是
       # node == 20，而 20 的 Test 一直在失败，产物实际上从来没传上去过。

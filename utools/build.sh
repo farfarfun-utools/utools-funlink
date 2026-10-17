@@ -8,6 +8,25 @@ cd "$ROOT_DIR"
 command -v node >/dev/null || { echo "error: Node.js is required" >&2; exit 1; }
 command -v pnpm >/dev/null || { echo "error: pnpm is required (corepack enable)" >&2; exit 1; }
 
+# Node 的下限只写在 package.json#engines.node 一处，这里读它来卡 —— 原来这个脚本一个
+# 版本检查都没有，而测试用的 jsdom 30 自己要求 22.22.2+，版本不够的表现是所有 jsdom
+# 环境的测试文件一加载就炸（markAsUncloneable is not a function），看不出是 Node 的事。
+node -e '
+const want = (require("./package.json").engines || {}).node || "";
+const match = /^>=\s*(\d+)\.(\d+)\.(\d+)$/.exec(want.trim());
+if (!match) {
+  console.error(`error: package.json#engines.node 是「${want}」，本脚本只认 >=x.y.z 这种写法`);
+  process.exit(2);
+}
+const need = match.slice(1).map(Number);
+const have = process.versions.node.split(".").map(Number);
+const diff = need.map((n, i) => have[i] - n).find((d) => d !== 0) || 0;
+if (diff < 0) {
+  console.error(`error: Node ${want} is required, found ${process.versions.node}`);
+  process.exit(1);
+}
+'
+
 echo "=== install dependencies ==="
 pnpm install --frozen-lockfile
 

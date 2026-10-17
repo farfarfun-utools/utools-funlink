@@ -6,6 +6,17 @@ FunLink 是一个面向 uTools 的网址收藏与快速访问插件。它把零�
 
 插件无需账号或独立服务端，数据保存在 uTools `dbStorage` 中。项目使用 Vue 3、Composition API 和 Vite 构建，并通过独立组件与 composable 组织界面和业务状态。
 
+## 截图
+
+| | |
+| --- | --- |
+| <img src="docs/screenshots/home.png" alt="网址导航"> | <img src="docs/screenshots/edit.png" alt="编辑卡片"> |
+| 一级分类在顶部，二级分类在下面一排，卡片可拖拽排序 | 图标、分类、打开方式、网页快开都在同一个面板里 |
+| <img src="docs/screenshots/settings.png" alt="设置"> | <img src="docs/screenshots/dark.png" alt="深色主题"> |
+| WebDav / 本地备份还原，以及浏览器书签导入 | 浅色 / 深色 / 跟随系统 |
+
+> 图里的收藏都是为截图造的演示数据。
+
 ## 主要功能
 
 ### 网址管理

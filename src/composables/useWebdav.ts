@@ -72,6 +72,12 @@ export function useWebdav({ onMessage, backupContent, onRestore }: WebdavDeps) {
   }
 
   async function save() {
+    try {
+      if (new URL(config.host).protocol !== 'https:') throw new Error('WebDAV 服务器必须使用 HTTPS')
+    } catch {
+      onMessage('请输入有效的 HTTPS WebDAV 地址', true)
+      return
+    }
     await write()
     onMessage('设置已保存！')
   }

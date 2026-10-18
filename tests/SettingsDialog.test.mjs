@@ -205,7 +205,7 @@ test('保存 WebDav 配置时存储里不留明文密码', async () => {
   const wrapper = await openDataTab(mountDialog())
   await wrapper.find('.text-button').trigger('click')
   await nextTick()
-  await wrapper.find('.webdav-modal input[placeholder="请输入webdav服务器地址"]').setValue('https://dav.example.com')
+  await wrapper.find('.webdav-modal input[type="url"]').setValue('https://dav.example.com')
   await wrapper.find('.webdav-modal input[type="password"]').setValue('p@ssw0rd')
 
   await wrapper.find('.webdav-modal form').trigger('submit')
@@ -216,6 +216,17 @@ test('保存 WebDav 配置时存储里不留明文密码', async () => {
   assert.equal(stored.password, undefined, '明文字段不能再写进去')
   assert.ok(!JSON.stringify(stored).includes('p@ssw0rd'), '整条记录里都不该出现密码原文')
   assert.equal(await decryptSecret(stored.secret), 'p@ssw0rd', '本机解得开，备份时才有密码可用')
+})
+
+test('HTTP WebDAV 地址不能保存密码', async () => {
+  const wrapper = await openDataTab(mountDialog())
+  await wrapper.find('.text-button').trigger('click')
+  await wrapper.find('.webdav-modal input[type="url"]').setValue('http://dav.example.com')
+  await wrapper.find('.webdav-modal input[type="password"]').setValue('p@ssw0rd')
+
+  await wrapper.find('.webdav-modal form').trigger('submit')
+  await nextTick()
+  assert.equal(readStorage('funlink-webdav'), null)
 })
 
 test('读到 1.x 的明文密码就当场换成密文', async () => {

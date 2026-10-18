@@ -157,35 +157,14 @@ test('WebDAV 请求失败时，错误信息不会泄露 URL 或账号里的用�
   })
 })
 
-test('webdavList 正常返回服务端响应的原始内容', async () => {
-  const body = '<?xml version="1.0"?><d:multistatus xmlns:d="DAV:"></d:multistatus>'
+test('webdavList 不向 HTTP 服务发送凭据', async () => {
+  let requested = false
   await withServer((req, res) => {
-    assert.equal(req.method, 'PROPFIND')
-    res.writeHead(207, { 'Content-Type': 'application/xml' })
-    res.end(body)
+    requested = true
+    res.end()
   }, async base => {
-    const result = await funlink.webdavList({ host: base, username: 'u', password: 'p' })
-    assert.equal(result, body)
-  })
-})
-
-test('WebDAV 跨源重定向不会转发认证请求', async () => {
-  let redirectedRequest = false
-  await withServer((targetReq, targetRes) => {
-    redirectedRequest = true
-    targetRes.writeHead(204)
-    targetRes.end()
-  }, async target => {
-    await withServer((redirectReq, redirectRes) => {
-      redirectRes.writeHead(302, { Location: target })
-      redirectRes.end()
-    }, async base => {
-      await assert.rejects(
-        () => funlink.webdavBackup({ host: base, username: 'u', password: 'p' }, '{}'),
-        /必须与配置服务器同源/,
-      )
-      assert.equal(redirectedRequest, false)
-    })
+    await assert.rejects(() => funlink.webdavList({ host: base, username: 'u', password: 'p' }), /HTTPS/)
+    assert.equal(requested, false)
   })
 })
 
@@ -207,4 +186,18 @@ test('WebDAV 服务端返回的跨源 href 不会携带认证访问', async () =
       assert.equal(targetRequest, false)
     })
   })
+})
+
+test('WebDAV rejects HTTP before sending credentials', async () => {
+  let requested = false
+  await withServer((req, res) => { requested = true; res.end() }, async base => {
+    await assert.rejects(() => funlink.webdavBackup({ host: base, username: 'u', password: 'p' }, '{}'), /HTTPS/)
+    assert.equal(requested, false)
+  })
+})
+
+test('WebDAV cannot delete a same-origin file outside the backup directory', async () => {
+  const config = { host: 'https://example.test/remote/', username: 'u', password: 'p' }
+  await assert.rejects(() => funlink.webdavDelete(config, '/remote/other.json'), /备份目录/)
+  await assert.rejects(() => funlink.webdavDelete(config, '/remote/FunLink/%2e%2e/other.json'), /备份目录/)
 })

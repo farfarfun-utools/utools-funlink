@@ -264,7 +264,7 @@ defineExpose({ open, close })
   <dialog ref="webdavDialog" class="sub-modal webdav-modal">
     <form method="dialog" @submit.prevent="saveWebdav">
       <header><h2>WebDav配置</h2><button type="button" aria-label="关闭" @click="webdavDialog?.close()">×</button></header>
-      <label><span>服务器</span><input v-model="webdav.host" placeholder="请输入webdav服务器地址" required /></label>
+      <label><span>服务器</span><input v-model="webdav.host" type="url" placeholder="https://example.com/dav/" required /></label>
       <label><span>用户名</span><input v-model="webdav.username" placeholder="请输入webdav用户名" required /></label>
       <label><span>密 码</span><input v-model="webdav.password" type="password" placeholder="请输入webdav访问密码" required /></label>
       <footer><button type="button" class="button" @click="webdavDialog?.close()">取消</button><button type="submit" class="button primary">保存</button></footer>

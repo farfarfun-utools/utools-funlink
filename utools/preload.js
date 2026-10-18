@@ -254,10 +254,22 @@ function webdavUrl(config, target) {
   return url.href
 }
 
+function webdavFileUrl(config, href) {
+  const base = new URL(config.host.endsWith('/') ? config.host : `${config.host}/`)
+  const directory = new URL(`${WEBDAV_DIRECTORY}/`, base)
+  const target = new URL(webdavUrl(config, href))
+  const pathname = decodeURIComponent(target.pathname)
+  if (!pathname.startsWith(decodeURIComponent(directory.pathname)) || pathname.split('/').includes('..')) {
+    throw new Error('WebDAV 文件地址不在备份目录中')
+  }
+  return target.href
+}
+
 function webdavRequest(config, target, options = {}) {
   const base = new URL(config.host)
-  if (!['http:', 'https:'].includes(base.protocol)) throw new Error('WebDAV 仅支持 HTTP 和 HTTPS 服务器')
-  return request(webdavUrl(config, target), { ...options, allowedOrigin: base.origin })
+  const url = webdavUrl(config, target)
+  if (base.protocol !== 'https:') throw new Error('WebDAV 服务器必须使用 HTTPS')
+  return request(url, { ...options, allowedOrigin: base.origin })
 }
 
 function webdavHeaders(config, extra = {}) {
@@ -304,10 +316,10 @@ window.funlink = {
     })).body
   },
   async webdavRestore(config, href) {
-    return (await webdavRequest(config, href, { headers: webdavHeaders(config) })).body
+    return (await webdavRequest(config, webdavFileUrl(config, href), { headers: webdavHeaders(config) })).body
   },
   async webdavDelete(config, href) {
-    await webdavRequest(config, href, { method: 'DELETE', headers: webdavHeaders(config) })
+    await webdavRequest(config, webdavFileUrl(config, href), { method: 'DELETE', headers: webdavHeaders(config) })
   },
   async checkUrl(url) {
     const result = await request(url, { method: 'HEAD' })

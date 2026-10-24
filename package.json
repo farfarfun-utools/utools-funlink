@@ -34,5 +34,7 @@
     "vite": "^7.3.7",
     "vitest": "^4.1.12",
     "vue-tsc": "^3.3.12"
-  }
+  },
+  "description": "一链即达 FunLink：收藏、分类、搜索并快速打开网址",
+  "homepage": "https://farfarfun.github.io/packages/utools-funlink/"
 }

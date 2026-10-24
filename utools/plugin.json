@@ -1,7 +1,7 @@
 {
-  "pluginName": "网址收藏 FunLink",
+  "pluginName": "一链即达",
   "version": "1.0.0",
-  "description": "收藏、分类、搜索并快速打开网址",
+  "description": "一链即达 FunLink：收藏、分类、搜索并快速打开网址",
   "author": "farfarfun",
   "main": "dist/index.html",
   "preload": "preload.js",
@@ -15,7 +15,7 @@
       "description": "收藏、分类和快速打开网址",
       "icon": "logo.png",
       "platform": ["darwin", "win32", "linux"],
-      "cmds": ["FunLink", "网址收藏", "网址导航"]
+      "cmds": ["一链即达", "FunLink", "网址收藏", "网址导航"]
     },
     {
       "code": "search-link",
@@ -48,7 +48,7 @@
   ],
   "tools": {
     "search_bookmarks": {
-      "description": "搜索用户在 FunLink（网址收藏）里收藏的网址，返回标题、网址、简介和所属分类。关键词留空则返回收藏列表的开头几条。",
+      "description": "搜索用户在一链即达 FunLink 里收藏的网址，返回标题、网址、简介和所属分类。关键词留空则返回收藏列表的开头几条。",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,

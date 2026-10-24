@@ -1,4 +1,6 @@
-# 网址收藏 FunLink
+# 一链即达 · FunLink
+
+[产品主页](https://farfarfun.github.io/packages/utools-funlink/) · 原名「网址收藏」
 
 FunLink 是一个面向 uTools 的网址收藏与快速访问插件。它把零散书签整理成清晰的网址导航，并将收藏、搜索和打开网页串联到 uTools 主搜索框中，适合管理工作入口、开发文档、设计素材和常用在线工具。
 
@@ -34,7 +36,7 @@ FunLink 是一个面向 uTools 的网址收藏与快速访问插件。它把零�
 
 ### uTools 联动
 
-- 输入 `FunLink`、`网址收藏`、`网址导航` 或 `web` 打开插件
+- 输入 `一链即达`、`FunLink`、`网址收藏`、`网址导航` 或 `web` 打开插件
 - 在 uTools 主搜索框粘贴网址，直接进入添加流程
 - 从 uTools 搜索面板检索收藏的网址，无需先进入插件（结果显示卡片自己的图标）
 - 将卡片设为“网页快开”后，可通过网址名称直接打开
@@ -87,7 +89,7 @@ WebDav 备份/还原、「检查无效链接」，后三项都要用户显式触
 1. 运行 `sh build.sh`。
 2. 打开 uTools 的“开发者工具”插件。
 3. 选择“新建项目”，载入 `utools/plugin.json`。
-4. 运行项目后，通过 uTools 搜索 `FunLink` 进入插件。
+4. 运行项目后，通过 uTools 搜索 `一链即达` 或 `FunLink` 进入插件。
 
 插件根目录是 `utools/`：`plugin.json` 及其引用的 `preload.js`、`logo.png`、
 构建产物 `dist/` 都在这一层，目录内不含 `.git`，可直接用于 uTools 打包。

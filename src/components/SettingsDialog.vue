@@ -156,7 +156,7 @@ defineExpose({ open, close })
 <template>
   <dialog ref="dialog" class="settings-drawer" aria-labelledby="settings-title" @click="closeOnBackdrop" @cancel.prevent="close">
     <header class="settings-header">
-      <h2 id="settings-title">设置</h2>
+      <h2 id="settings-title">一链即达 · 设置</h2>
       <button type="button" class="settings-close" aria-label="关闭" @click="close">×</button>
     </header>
     <div class="settings-body">

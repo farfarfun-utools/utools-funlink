@@ -284,7 +284,7 @@ window.funlink = {
   openExternal: openWithBrowser,
   saveBackup(content) {
     const destination = utools.showSaveDialog({
-      title: '导出 FunLink 备份',
+      title: '导出一链即达 FunLink 备份',
       defaultPath: `funlink-${new Date().toISOString().slice(0, 10)}.json`,
       filters: [{ name: 'JSON', extensions: ['json'] }],
     })

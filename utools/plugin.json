@@ -15,7 +15,7 @@
       "description": "收藏、分类和快速打开网址",
       "icon": "logo.png",
       "platform": ["darwin", "win32", "linux"],
-      "cmds": ["FunLink", "网址收藏", "网址导航", "网页收藏", "web"]
+      "cmds": ["FunLink", "网址收藏", "网址导航"]
     },
     {
       "code": "search-link",

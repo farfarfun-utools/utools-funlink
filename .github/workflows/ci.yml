@@ -87,6 +87,6 @@ jobs:
         if: matrix.node == '22' && github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
-          name: utools-funlink-upxs-preview
+          name: utools-funlink-upxs
           path: release/
           if-no-files-found: error

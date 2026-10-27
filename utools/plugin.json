@@ -1,6 +1,6 @@
 {
   "pluginName": "一链即达",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "一链即达 FunLink：收藏、分类、搜索并快速打开网址",
   "author": "farfarfun",
   "main": "dist/index.html",

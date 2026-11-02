@@ -14,27 +14,30 @@ export function normalizeUrl(value: unknown): string {
     throw new Error('网址格式不正确')
   }
   if (!ALLOWED_PROTOCOLS.has(url.protocol)) throw new Error('仅支持 http、https、ftp 和 file 网址')
-  return url.href
+  return input.includes(QUERY_PLACEHOLDER) ? url.href.replaceAll('%7Bq%7D', QUERY_PLACEHOLDER) : url.href
 }
 
 // 站内搜索占位符。卡片网址里写上它，打开时换成用户输入的关键词。
 // 判断、填充、去掉这三件事散在打开链路、抓图标、主搜索推送、AI 工具里一共七处，
 // 字面量各写一遍的话，改规则就得同时记住七个地方。
 export const QUERY_PLACEHOLDER = '{q}'
+const ENCODED_QUERY_PLACEHOLDER = /%7Bq%7D/gi
 
 /** 是否是站内搜索类网址。这类卡片打开前必须先拿到关键词。 */
 export function hasQueryPlaceholder(url: unknown): boolean {
-  return String(url || '').includes(QUERY_PLACEHOLDER)
+  const value = String(url || '')
+  return value.includes(QUERY_PLACEHOLDER) || /%7Bq%7D/i.test(value)
 }
 
 /** 把占位符换成关键词。关键词要 URL 编码，否则空格和中文会把地址截断。 */
 export function fillQueryPlaceholder(url: string, keyword: string): string {
-  return url.replaceAll(QUERY_PLACEHOLDER, encodeURIComponent(keyword))
+  const encoded = encodeURIComponent(keyword)
+  return url.replaceAll(QUERY_PLACEHOLDER, encoded).replace(ENCODED_QUERY_PLACEHOLDER, encoded)
 }
 
 /** 去掉占位符，得到一个还能请求的地址：站点首页和 /favicon.ico 兜底都还在。 */
 export function stripQueryPlaceholder(url: string): string {
-  return url.replaceAll(QUERY_PLACEHOLDER, '')
+  return url.replaceAll(QUERY_PLACEHOLDER, '').replace(ENCODED_QUERY_PLACEHOLDER, '')
 }
 
 /** 是不是 http(s) 网址。只有这类才有网页图标可抓、才能发请求探活，file / ftp 没有。 */

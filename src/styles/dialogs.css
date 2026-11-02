@@ -107,12 +107,15 @@
 .bookmark-browser-field { position: relative; }
 .bookmark-browser-field::after { content: '⌄'; position: absolute; right: 12px; bottom: 8px; color: var(--muted); font-size: 14px; line-height: 18px; pointer-events: none; }
 .bookmark-browser-field select { padding: 0 36px 0 12px; font-size: 14px; appearance: none; }
-.quick-switch { width: fit-content; height: 32px; display: flex; align-items: center; gap: 8px; margin-top: 9px; font-size: 14px; font-weight: 400; cursor: pointer; }
+.quick-options-row { display: flex; align-items: center; gap: 12px; margin-top: 9px; }
+.quick-switch { width: fit-content; height: 32px; flex: 0 0 auto; display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 400; cursor: pointer; }
 .quick-switch input { position: absolute; opacity: 0; }
 .quick-switch .switch-control { width: 30px; height: 16px; flex-basis: 30px; background: var(--switch-off); }
 .quick-switch .switch-control::after { width: 12px; height: 12px; }
+.quick-switch input:checked + .switch-control { background: var(--primary); }
 .quick-switch input:checked + .switch-control::after { transform: translateX(14px); }
 .quick-switch .icon-help { margin-left: 3px; color: var(--muted); font-size: 14px; }
+.quick-regex-input.bookmark-url-input { width: 100%; min-width: 0; height: 32px; line-height: 30px; }
 .bookmark-dialog .form-error { height: 16px; min-height: 16px; margin-top: 0; }
 .bookmark-dialog-footer { display: flex; justify-content: center; gap: 12px; margin-top: 12px; }
 .bookmark-dialog-footer .button { height: 32px; min-height: 32px; padding: 8px 15px; font-size: 14px; line-height: 14px; }

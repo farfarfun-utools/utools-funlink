@@ -3,7 +3,7 @@
 // useDataTransfer / useIconBackfill），这里只留状态本身和卡片、分类的增删改。
 import { computed, ref } from 'vue'
 import { createId, moveCategory, moveItem, normalizeCategoryIds } from '../lib/core'
-import { removeQuickFeature, syncQuickFeature } from '../lib/features'
+import { removeQuickFeature, resetQuickFeatures, syncQuickFeature } from '../lib/features'
 import { iconRefFor, storeIcon } from '../lib/iconStore'
 import { STORAGE_KEY, categoryIdsOf, loadState } from '../lib/state'
 import { commitStorage, readStorage, serializeForStorage } from '../lib/storage'
@@ -30,6 +30,13 @@ export function useFunLink() {
   const { toast, showToast } = useToast()
   const { keywordPrompt, askKeyword, resolveKeyword } = useKeywordPrompt()
   let lastSavedJson = ''
+  let lastGoodJson = serializeForStorage(state.value).json
+
+  function restoreLastGoodState() {
+    state.value = JSON.parse(lastGoodJson) as AppState
+    applyTheme()
+    resetQuickFeatures(state.value.bookmarks)
+  }
 
   const childrenOf = (parentId: string): Category[] => views.childrenOf(state.value.categories, parentId)
   const roots = computed(() => views.rootCategories(state.value.categories))
@@ -47,7 +54,10 @@ export function useFunLink() {
    * 否则成功提示会盖掉错误提示，用户看到的就是一次假成功。
    */
   function saveState(): boolean {
-    if (storageError.value) return false
+    if (storageError.value) {
+      restoreLastGoodState()
+      return false
+    }
     const snapshot = serializeForStorage(state.value)
     // 内容和上次写进去的完全一样就不再写。整库收藏压在一个文档里，一次保存就是
     // 全量落盘加一次云同步，而点同一个导航、把卡片拖回原处这类空操作很常见。
@@ -55,8 +65,13 @@ export function useFunLink() {
     // 要把迁移结果落下去。
     if (snapshot.json === lastSavedJson) return true
     const result = commitStorage(STORAGE_KEY, snapshot)
-    if (!result.ok) showToast(result.message || '保存失败', true)
-    else lastSavedJson = snapshot.json
+    if (!result.ok) {
+      showToast(result.message || '保存失败', true)
+      restoreLastGoodState()
+    } else {
+      lastSavedJson = snapshot.json
+      lastGoodJson = snapshot.json
+    }
     return result.ok
   }
 
@@ -97,9 +112,9 @@ export function useFunLink() {
     if (previous) state.value.bookmarks[state.value.bookmarks.indexOf(previous)] = bookmark
     else if (afterId) state.value.bookmarks.splice(state.value.bookmarks.findIndex(item => item.id === afterId) + 1, 0, bookmark)
     else state.value.bookmarks.push(bookmark)
-    syncQuickFeature(bookmark)
     const saved = saveState()
     if (saved) {
+      syncQuickFeature(bookmark)
       showToast(previous ? '网址已更新' : '网址已添加')
       // 保存本身必须是同步的（AI 工具按返回值报成败），所以新图标先内联落盘，
       // 挪进附件在后台接着做。
@@ -115,11 +130,7 @@ export function useFunLink() {
     if (saveState()) showToast('笔记已保存')
   }
 
-  /**
-   * 批量把抓来的图标写进卡片。返回是否落盘成功。
-   * 写失败就把这一批改回原样：内存和存储必须一致，否则后面每次保存都会
-   * 带着这批图标再撞一次同样的上限。
-   */
+  /** 批量把抓来的图标写进卡片。返回是否落盘成功。 */
   async function applyIcons(updates: IconUpdate[]): Promise<boolean> {
     // 先存附件再落盘：这样整库文档里每张图标只多出一个 ID，图标本身不占那 1MB
     // 的额度，几百张卡片一次抓完也不会把文档顶到上限。
@@ -131,7 +142,6 @@ export function useFunLink() {
     const changed = updates.flatMap(update => {
       const bookmark = state.value.bookmarks.find(item => item.id === update.id)
       if (!bookmark || !update.iconData) return []
-      const previous = { bookmark, iconType: bookmark.iconType, iconData: bookmark.iconData, iconRef: bookmark.iconRef }
       const ref = refs.get(update.id)
       bookmark.iconType = 'image'
       if (ref) {
@@ -142,18 +152,13 @@ export function useFunLink() {
         bookmark.iconData = update.iconData
         delete bookmark.iconRef
       }
-      // 快开入口的图标取自卡片，换了图标得重新注册一遍才会跟着变。
-      if (bookmark.quick) syncQuickFeature(bookmark)
-      return [previous]
+      return [bookmark]
     })
     if (!changed.length) return true
-    if (saveState()) return true
-    changed.forEach(({ bookmark, ...icon }) => {
-      // 字段可能本来就没有，赋成 undefined 和没有这个字段在序列化时是一回事。
-      Object.assign(bookmark, icon)
-      if (bookmark.quick) syncQuickFeature(bookmark)
-    })
-    return false
+    if (!saveState()) return false
+    // 快开入口的图标取自卡片，换了图标得重新注册一遍才会跟着变。
+    changed.filter(bookmark => bookmark.quick).forEach(syncQuickFeature)
+    return true
   }
 
   const iconBackfill = useIconBackfill({ state, storageError, applyIcons, showToast })
@@ -167,16 +172,20 @@ export function useFunLink() {
 
   function toggleQuick(bookmark: Bookmark) {
     bookmark.quick = !bookmark.quick
-    syncQuickFeature(bookmark)
-    if (saveState()) showToast(bookmark.quick ? '已开启网页快开' : '已关闭网页快开')
+    if (saveState()) {
+      syncQuickFeature(bookmark)
+      showToast(bookmark.quick ? '已开启网页快开' : '已关闭网页快开')
+    }
   }
 
   function moveToTrash(bookmark: Bookmark) {
     bookmark.previousCategoryIds = categoryIdsOf(bookmark)
     bookmark.deletedAt = Date.now()
     bookmark.quick = false
-    syncQuickFeature(bookmark)
-    if (saveState()) showToast('已移到废纸篓')
+    if (saveState()) {
+      syncQuickFeature(bookmark)
+      showToast('已移到废纸篓')
+    }
   }
 
   function restoreBookmark(bookmark: Bookmark) {
@@ -191,8 +200,10 @@ export function useFunLink() {
   function deleteBookmark(bookmark: Bookmark) {
     if (!window.confirm(`永久删除“${bookmark.title}”？此操作无法撤销。`)) return
     state.value.bookmarks = state.value.bookmarks.filter(item => item.id !== bookmark.id)
-    removeQuickFeature(bookmark.id)
-    if (saveState()) showToast('网址已永久删除')
+    if (saveState()) {
+      removeQuickFeature(bookmark.id)
+      showToast('网址已永久删除')
+    }
   }
 
   function emptyTrash() {
@@ -263,8 +274,9 @@ export function useFunLink() {
 
   function setTheme(theme: AppState['theme']) {
     state.value.theme = theme
-    saveState()
+    const saved = saveState()
     applyTheme()
+    return saved
   }
 
   function saveSettings() {
@@ -273,8 +285,9 @@ export function useFunLink() {
 
   function cycleTheme() {
     const order: AppState['theme'][] = ['system', 'light', 'dark']
-    setTheme(order[(order.indexOf(state.value.theme) + 1) % order.length] ?? 'system')
-    showToast({ system: '跟随系统主题', light: '已切换浅色主题', dark: '已切换深色主题' }[state.value.theme])
+    if (setTheme(order[(order.indexOf(state.value.theme) + 1) % order.length] ?? 'system')) {
+      showToast({ system: '跟随系统主题', light: '已切换浅色主题', dark: '已切换深色主题' }[state.value.theme])
+    }
   }
 
   const { exportBackup, processDataFile, resetData } = useDataTransfer({
@@ -307,6 +320,7 @@ export function useFunLink() {
     seedState().then(seeded => {
       if (state.value.bookmarks.length || state.value.categories.length) return
       state.value = seeded
+      lastGoodJson = serializeForStorage(seeded).json
       applyTheme()
     })
   }

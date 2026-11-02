@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { initials, isAbsoluteUrl, isHttpUrl, normalizeUrl, safeColor } from '../lib/core'
 import { bookmarkIcon, loadIcon } from '../lib/iconStore'
 import { fetchSiteIcon, toIconDataUrl } from '../lib/image'
+import { quickRegexMatch } from '../lib/features'
 import { childrenOf as childrenIn, rootCategories } from '../lib/views'
 import type { BrowserMode, Bookmark, Category } from '../lib/types'
 
@@ -23,6 +24,7 @@ interface BookmarkForm {
   browser: BrowserMode
   favorite: boolean
   quick: boolean
+  quickRegex: string
 }
 
 const COLORS = ['#8480f9', '#2792ff', '#1fd88b', '#fdcd05', '#ff7ba2', '#98d517', '#ff7f1b', '#07b882']
@@ -71,7 +73,7 @@ function blankForm(): BookmarkForm {
   return {
     id: '', url: '', urls: [], title: '', description: '', categoryId: props.defaultCategoryId || 'cat@default', categoryIds: [props.defaultCategoryId || 'cat@default'],
     iconType: 'text', icon: '', color: safeColor(COLORS[props.bookmarkCount % COLORS.length]), iconData: '', iconSize: 16,
-    browser: 'default', favorite: false, quick: false,
+    browser: 'default', favorite: false, quick: false, quickRegex: '',
   }
 }
 
@@ -81,6 +83,7 @@ function open(bookmark: Partial<Bookmark> | null = null, insertAfterId: string |
   afterId.value = insertAfterId
   error.value = ''
   Object.assign(form, blankForm(), bookmark || {})
+  form.quickRegex = typeof bookmark?.quickRegex === 'string' ? bookmark.quickRegex : ''
   const categoryIds = bookmark?.categoryIds?.length
     ? bookmark.categoryIds.slice()
     : [bookmark?.categoryId || props.defaultCategoryId || 'cat@default']
@@ -227,6 +230,7 @@ function submit() {
     if (!form.title.trim()) throw new Error('网站名称不能为空')
     if (!form.categoryIds.length) throw new Error('请选择分类')
     if (form.iconType === 'image' && !form.iconData) throw new Error('请选择图标图片，或改用文字图标')
+    if (form.quick && form.quickRegex.trim() && !quickRegexMatch(form.quickRegex)) throw new Error('快开正则表达式无效或超过 200 字符')
     emit('save', {
       id: form.id,
       url: normalizeUrl(form.url),
@@ -244,6 +248,7 @@ function submit() {
       browser: form.browser,
       favorite: form.favorite,
       quick: form.quick,
+      quickRegex: form.quickRegex.trim(),
     }, afterId.value)
     close()
   } catch (caught) {
@@ -451,7 +456,10 @@ defineExpose({ open, close })
               </select>
             </label>
           </div>
-          <label class="quick-switch"><input v-model="form.quick" type="checkbox" /><span class="switch-control" aria-hidden="true" /><span>网页快开</span><i class="iconfont icon-help" title="支持从 uTools 主搜索框快速打开网页" /></label>
+          <div class="quick-options-row">
+            <label class="quick-switch"><input v-model="form.quick" type="checkbox" /><span class="switch-control" aria-hidden="true" /><span>网页快开</span><i class="iconfont icon-help" title="普通收藏可按名称、简介等搜索；快开可按名称或正则唤起，网址中的 {q} 会替换为输入内容" /></label>
+            <input v-if="form.quick" v-model="form.quickRegex" class="bookmark-url-input quick-regex-input" aria-label="快开正则表达式" maxlength="200" spellcheck="false" placeholder="正则匹配（可选）" title="输入正则表达式内容，例如 ^v_algo_.*$，不需要两侧的 /" />
+          </div>
           <div class="form-error" role="alert">{{ error }}</div>
           <footer class="bookmark-dialog-footer"><button class="button" type="button" @click="close">取消</button><button class="button primary" type="submit">保存</button></footer>
         </template>

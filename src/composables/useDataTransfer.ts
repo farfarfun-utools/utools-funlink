@@ -42,12 +42,19 @@ export interface DataTransferDeps {
 }
 
 export function useDataTransfer({ state, storageError, saveState, showToast, applyTheme, syncIcons }: DataTransferDeps) {
-  function exportBackup() {
+  async function exportBackup() {
     if (!window.confirm('导出内容为明文，可能包含网址、笔记和设置。确认备份到电脑？')) return
     // 图标要还原成内联的 data URL：卡片上存的是本机数据库里的附件 ID，
     // 只带 ID 的备份换一台设备恢复出来就是一堆空图标。
-    const content = JSON.stringify(withInlineIcons(state.value), null, 2)
-    if (window.funlink?.saveBackup?.(content)) return showToast('备份已导出')
+    const content = JSON.stringify(await withInlineIcons(state.value), null, 2)
+    if (window.funlink?.saveBackup) {
+      try {
+        if (window.funlink.saveBackup(content)) showToast('备份已导出')
+      } catch (error) {
+        showToast(`导出失败：${error instanceof Error ? error.message : String(error)}`, true)
+      }
+      return
+    }
     const link = document.createElement('a')
     link.href = URL.createObjectURL(new Blob([content], { type: 'application/json' }))
     link.download = `funlink-${new Date().toISOString().slice(0, 10)}.json`
@@ -61,24 +68,31 @@ export function useDataTransfer({ state, storageError, saveState, showToast, app
     // 既接受 FunLink 自己的备份，也接受「网址精灵」导出的 { db, flyDb } / 裸数组。
     const source = isLegacyExport(parsed) ? convertLegacyExport(parsed).state : parsed
     const { state: restored, dropped } = prepareState(source)
+    const previousQuickIds = state.value.bookmarks.filter(bookmark => bookmark.quick).map(bookmark => bookmark.id)
     state.value = restored
     // 恢复成功即说明拿到了可用数据，可以解除只读保护。
+    const previousError = storageError.value
     storageError.value = ''
     const saved = saveState()
-    applyTheme()
-    resetQuickFeatures(state.value.bookmarks)
-    if (saved) {
-      // 备份里的图标是内联的，恢复完挪进附件；上一份数据的附件这时也没人引用了。
-      syncIcons()
-      showToast(dropped ? `备份已恢复，已跳过 ${dropped} 条无效网址` : '备份已恢复')
+    if (!saved) {
+      storageError.value = previousError
+      return false
     }
-    return saved
+    applyTheme()
+    previousQuickIds.forEach(removeQuickFeature)
+    resetQuickFeatures(state.value.bookmarks)
+    // 备份里的图标是内联的，恢复完挪进附件；上一份数据的附件这时也没人引用了。
+    syncIcons()
+    showToast(dropped ? `备份已恢复，已跳过 ${dropped} 条无效网址` : '备份已恢复')
+    return true
   }
 
   function importBookmarks(content: string, options: TransferOptions): boolean {
     const imported = parseBookmarkHtml(content)
+    const previousQuickIds = options.mode === 'replace'
+      ? state.value.bookmarks.filter(bookmark => bookmark.quick).map(bookmark => bookmark.id)
+      : []
     if (options.mode === 'replace') {
-      state.value.bookmarks.filter(bookmark => bookmark.quick).forEach(bookmark => removeQuickFeature(bookmark.id))
       state.value.categories = []
       state.value.bookmarks = []
     }
@@ -106,6 +120,7 @@ export function useDataTransfer({ state, storageError, saveState, showToast, app
     state.value.currentView = `category:${categoryId}`
     const saved = saveState()
     if (saved) {
+      previousQuickIds.forEach(removeQuickFeature)
       // 整库替换模式下原来那批卡片连图标一起没了，它们的附件要清掉。
       if (options.mode === 'replace') syncIcons()
       showToast(`已导入 ${bookmarks.length} 个网址`)
@@ -125,19 +140,23 @@ export function useDataTransfer({ state, storageError, saveState, showToast, app
 
   async function resetData() {
     if (!window.confirm('恢复示例数据？当前数据会被覆盖。')) return false
-    state.value.bookmarks.filter(bookmark => bookmark.quick).forEach(bookmark => removeQuickFeature(bookmark.id))
+    const previousQuickIds = state.value.bookmarks.filter(bookmark => bookmark.quick).map(bookmark => bookmark.id)
     state.value = await seedState()
     // 用户明确选择了覆盖，此时解除只读保护。
+    const previousError = storageError.value
     storageError.value = ''
     const saved = saveState()
-    applyTheme()
-    resetQuickFeatures(state.value.bookmarks)
-    if (saved) {
-      // 示例数据自带图标，同样挪进附件；被覆盖掉的那份数据的附件顺手清掉。
-      syncIcons()
-      showToast('已恢复示例数据')
+    if (!saved) {
+      storageError.value = previousError
+      return false
     }
-    return saved
+    applyTheme()
+    previousQuickIds.forEach(removeQuickFeature)
+    resetQuickFeatures(state.value.bookmarks)
+    // 示例数据自带图标，同样挪进附件；被覆盖掉的那份数据的附件顺手清掉。
+    syncIcons()
+    showToast('已恢复示例数据')
+    return true
   }
 
   return { exportBackup, processDataFile, resetData }

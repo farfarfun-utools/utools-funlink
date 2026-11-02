@@ -1,12 +1,15 @@
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import {
-  bookmarkMatches, createId, displayHost, isSafeUrl, migrateBookmark, migrateState, moveCategory,
-  moveItem, normalizeCategoryIds, normalizeUrl, safeColor, splitTitle, urlsOf, validateState,
+  bookmarkMatches, createId, displayHost, fillQueryPlaceholder, hasQueryPlaceholder, isSafeUrl,
+  migrateBookmark, migrateState, moveCategory, moveItem, normalizeCategoryIds, normalizeUrl,
+  safeColor, splitTitle, stripQueryPlaceholder, urlsOf, validateState,
 } from '../src/lib/core.ts'
 
 test('core bookmark operations stay predictable', () => {
   assert.equal(normalizeUrl('example.com'), 'https://example.com/')
+  assert.equal(normalizeUrl('https://map.intime.com/table/{q}'), 'https://map.intime.com/table/{q}')
+  assert.equal(normalizeUrl('https://example.com/%7Bq%7D'), 'https://example.com/%7Bq%7D')
   assert.throws(() => normalizeUrl('javascript:alert(1)'), /仅支持/)
   assert.equal(bookmarkMatches({ title: 'Vue 文档', url: 'https://vuejs.org' }, 'vue'), true)
   assert.equal(bookmarkMatches({ title: 'Vue 文档', description: '渐进式框架' }, '渐进', ['title']), false)
@@ -15,6 +18,13 @@ test('core bookmark operations stay predictable', () => {
   assert.deepEqual(normalizeCategoryIds(['cat-a', 'cat-b', 'cat-a']), ['cat-a', 'cat-b'])
   assert.deepEqual(normalizeCategoryIds([]), ['cat@default'])
   assert.deepEqual(moveCategory([{ id: 'a', parentId: '' }, { id: 'b', parentId: '' }], 'b', 'a').map(item => [item.id, item.parentId]), [['b', 'a'], ['a', '']])
+})
+
+test('旧版保存成编码路径的 {q} 仍可填入输入内容', () => {
+  const url = 'https://map.intime.com/table/%7Bq%7D'
+  assert.equal(hasQueryPlaceholder(url), true)
+  assert.equal(fillQueryPlaceholder(url, 'v_algo_nlp_base_data'), 'https://map.intime.com/table/v_algo_nlp_base_data')
+  assert.equal(stripQueryPlaceholder(url), 'https://map.intime.com/table/')
 })
 
 test('validateState only rejects the wrong shape', () => {

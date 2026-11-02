@@ -62,6 +62,7 @@ async function openSubDialog(wrapper, entry) {
 afterEach(() => {
   localStorage.clear()
   delete window.funlink
+  delete window.utools
 })
 
 test('关闭时设置没动过就不回传保存', async () => {
@@ -132,6 +133,16 @@ test('有桥接层时直接读文件内容并带上导入选项', async () => {
   assert.deepEqual(options, { mode: 'append', tabPosition: 'left' })
 })
 
+test('取消 uTools 原生文件选择后不再弹浏览器文件框', async () => {
+  window.funlink = { chooseTextFile: () => null }
+  const wrapper = await openDataTab(mountDialog())
+  let clicked = 0
+  wrapper.find('input[accept="application/json,.json"]').element.click = () => { clicked++ }
+
+  await wrapper.find('.data-field:nth-of-type(2) .data-button.success').trigger('click')
+  assert.equal(clicked, 0)
+})
+
 test('未配置 WebDav 就点备份只提示，不发请求', async () => {
   let calls = 0
   window.funlink = { webdavBackup: async () => { calls++ } }
@@ -171,6 +182,19 @@ test('WebDav 列表只保留 .json 并按修改时间倒序', async () => {
     const names = wrapper.findAll('.webdav-file-list > div > span').map(node => node.text())
     assert.deepEqual(names, ['new.json', 'old.json'])
   })
+})
+
+test('WebDav 下载成功但实际恢复失败时保留备份列表', async () => {
+  const xml = '<multistatus xmlns="DAV:"><response><href>/FunLink/a.json</href></response></multistatus>'
+  let restored = ''
+  window.funlink = { webdavList: async () => xml, webdavRestore: async () => '{broken' }
+  localStorage.setItem('funlink-webdav', JSON.stringify({ host: 'https://dav.example.com', username: 'u', password: 'p' }))
+  const wrapper = await openDataTab(mountDialog({ restoreBackup: content => { restored = content; return false } }))
+  await wrapper.find('.data-button.success').trigger('click')
+  await vi.waitFor(() => assert.equal(wrapper.find('.webdav-list-modal').element.open, true))
+  await wrapper.find('.webdav-file-list button').trigger('click')
+  await vi.waitFor(() => assert.equal(restored, '{broken'))
+  assert.equal(wrapper.find('.webdav-list-modal').element.open, true)
 })
 
 test('WebDav 失败时把原因展示出来', async () => {
@@ -227,6 +251,31 @@ test('HTTP WebDAV 地址不能保存密码', async () => {
   await wrapper.find('.webdav-modal form').trigger('submit')
   await nextTick()
   assert.equal(readStorage('funlink-webdav'), null)
+  assert.equal(wrapper.find('.webdav-modal').element.open, true)
+})
+
+test('WebDav 配置写入失败时不报成功也不关闭编辑框', async () => {
+  window.utools = { getNativeId: () => 'test-device', dbStorage: { getItem: () => null, setItem: () => { throw new Error('db is locked') } } }
+  const wrapper = await openDataTab(mountDialog())
+  await wrapper.find('.text-button').trigger('click')
+  await wrapper.find('.webdav-modal input[type="url"]').setValue('https://dav.example.com')
+  await wrapper.find('.webdav-modal input[type="password"]').setValue('secret')
+  await wrapper.find('.webdav-modal form').trigger('submit')
+
+  await vi.waitFor(() => assert.match(wrapper.emitted('message').at(-1)[0], /db is locked/))
+  assert.equal(wrapper.find('.webdav-modal').element.open, true)
+  assert.ok(!wrapper.emitted('message').some(([message]) => message === '设置已保存！'))
+})
+
+test('迁移旧 WebDav 明文密码写入失败会报错并保留旧配置', async () => {
+  const stored = { host: 'https://dav.example.com', username: 'u', password: 'old-secret' }
+  window.utools = { getNativeId: () => 'test-device', dbStorage: { getItem: () => stored, setItem: () => { throw new Error('db is locked') } } }
+  const wrapper = await openDataTab(mountDialog())
+  await wrapper.find('.text-button').trigger('click')
+
+  await vi.waitFor(() => assert.match(wrapper.emitted('message').at(-1)[0], /db is locked/))
+  assert.equal(stored.password, 'old-secret')
+  assert.equal(wrapper.find('.webdav-modal input[type="password"]').element.value, 'old-secret')
 })
 
 test('读到 1.x 的明文密码就当场换成密文', async () => {

@@ -10,7 +10,7 @@ FunLink 是一个面向 uTools 的网址收藏与快速访问插件。它把零�
 
 ## UPXS 安装与发布
 
-从 [v1.0.1 Release](https://github.com/farfarfun-utools/utools-funlink/releases/tag/v1.0.1) 下载 `utools-funlink-1.0.1.upxs`，导入 uTools 使用。也可在成功的 CI 中下载 `utools-funlink-upxs` 附件。打包链路已由用户在 FunCalc 上验证；本插件的实机安装与功能仍需分别确认。
+从 [v1.0.2 Release](https://github.com/farfarfun-utools/utools-funlink/releases/tag/v1.0.2) 下载 `utools-funlink-1.0.2.upxs`，导入 uTools 使用。也可在成功的 CI 中下载 `utools-funlink-upxs` 附件。打包链路已由用户在 FunCalc 上验证；本插件的实机安装与功能仍需分别确认。
 
 项目根目录 [`identity.json`](identity.json) 明文维护官方项目 ID `zvghtljr`。`mid`、`uid`、`cellphone` 由 `farfarfun-utools` 组织的 `UTOOLS_MID`、`UTOOLS_UID`、`UTOOLS_CELLPHONE` Secrets 注入，不写入公开配置。CI 和 Release 统一调用固定版本的 [utools-devtools](https://github.com/farfarfun-action/utools-devtools)，生成 `.upxs` 与 `SHA256SUMS`，PR 不执行身份打包。
 
@@ -45,7 +45,8 @@ FunLink 是一个面向 uTools 的网址收藏与快速访问插件。它把零�
 - 输入 `一链即达`、`FunLink`、`网址收藏`、`网址导航` 或 `web` 打开插件
 - 在 uTools 主搜索框粘贴网址，直接进入添加流程
 - 从 uTools 搜索面板检索收藏的网址，无需先进入插件（结果显示卡片自己的图标）
-- 将卡片设为“网页快开”后，可通过网址名称直接打开
+- 将卡片设为“网页快开”后，可通过网址名称或自定义正则表达式直接打开
+- 快开正则填写表达式本体，不加两侧的 `/`；例如网址 `https://map.intime.com/table/{q}` 配合正则 `^v_algo_.*$`，输入 `v_algo_nlp_base_data` 会打开对应的表格网址
 - 网址中使用 `{q}` 作为占位符，可创建站内搜索入口
 
 例如：

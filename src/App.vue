@@ -107,7 +107,9 @@ function handleDrop(targetId: string) {
 }
 
 function handleDataFile(type: 'restore' | 'import', content: string, options: { mode?: string, tabPosition?: Category['tabPosition'] }) {
-  if (funlink.processDataFile(type, content, options)) settingsDialog.value?.close()
+  const saved = funlink.processDataFile(type, content, options)
+  if (saved) settingsDialog.value?.close()
+  return saved
 }
 
 async function handleReset() {
@@ -209,6 +211,7 @@ onBeforeUnmount(() => {
       :settings="state.settings"
       :bookmarks="state.bookmarks"
       :backup-data="state"
+      :restore-backup="content => handleDataFile('restore', content, {})"
       :backfill="funlink.iconBackfill"
       @save-settings="funlink.saveSettings"
       @clear-cookies="funlink.clearCookies"

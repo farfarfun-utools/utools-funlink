@@ -22,7 +22,8 @@ const props = withDefaults(defineProps<{
   backfill: IconBackfill
   bookmarks?: Bookmark[]
   backupData?: AppState | null
-}>(), { bookmarks: () => [], backupData: null })
+  restoreBackup?: (content: string) => boolean
+}>(), { bookmarks: () => [], backupData: null, restoreBackup: () => false })
 const emit = defineEmits(['save-settings', 'clear-cookies', 'export', 'data-file', 'reset', 'message'])
 const dialog = ref<HTMLDialogElement | null>(null)
 const webdavDialog = ref<HTMLDialogElement | null>(null)
@@ -54,8 +55,8 @@ const {
   onMessage: report,
   // 图标还原成内联 data URL：卡片上存的是本机数据库里的附件 ID，
   // 只带 ID 的备份换一台设备恢复出来就是一堆空图标。
-  backupContent: () => JSON.stringify(props.backupData && withInlineIcons(props.backupData), null, 2),
-  onRestore: content => emit('data-file', 'restore', content),
+  backupContent: async () => JSON.stringify(props.backupData && await withInlineIcons(props.backupData), null, 2),
+  onRestore: content => props.restoreBackup(content),
 })
 
 const {
@@ -81,9 +82,17 @@ function closeOnBackdrop(event: MouseEvent) {
 function choose(type: 'restore' | 'import', mode = 'append') {
   importMode.value = mode
   const extensions = type === 'restore' ? ['json'] : ['html', 'htm']
-  const content = window.funlink?.chooseTextFile?.(extensions)
-  if (typeof content === 'string') emit('data-file', type, content, { mode, tabPosition: tabPosition.value })
-  else (type === 'restore' ? restoreInput : importInput).value?.click()
+  if (window.funlink?.chooseTextFile) {
+    try {
+      const content = window.funlink.chooseTextFile(extensions)
+      if (typeof content === 'string') emit('data-file', type, content, { mode, tabPosition: tabPosition.value })
+    } catch (error) {
+      report(`读取文件失败：${error instanceof Error ? error.message : String(error)}`, true)
+    }
+    return
+  }
+  const input = type === 'restore' ? restoreInput : importInput
+  input.value?.click()
 }
 
 async function readFile(type: 'restore' | 'import', event: Event) {
@@ -110,8 +119,7 @@ async function openWebdav() {
 }
 
 async function saveWebdav() {
-  await saveWebdavConfig()
-  webdavDialog.value?.close()
+  if (await saveWebdavConfig()) webdavDialog.value?.close()
 }
 
 /** 「从WebDav还原」不是直接还原，而是先列出备份让用户挑一个。 */

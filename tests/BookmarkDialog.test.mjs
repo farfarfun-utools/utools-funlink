@@ -54,6 +54,26 @@ test('保存时网址会补全协议、标题去掉首尾空格', async () => {
   assert.equal(afterId, null)
 })
 
+test('快开正则保存到卡片，无效表达式不能提交', async () => {
+  const wrapper = await openDialog({ id: 'web_1', title: '示例', url: 'https://example.com', quick: true })
+  const input = wrapper.find('.quick-regex-input')
+  await input.setValue('^gh\\s+')
+  await wrapper.find('form').trigger('submit')
+  assert.equal(wrapper.emitted('save')[0][0].quickRegex, '^gh\\s+')
+
+  await input.setValue('[abc')
+  await wrapper.find('form').trigger('submit')
+  assert.equal(wrapper.emitted('save').length, 1)
+  assert.match(wrapper.find('.form-error').text(), /正则表达式无效/)
+})
+
+test('关闭快开时旧数据里的无效正则不会阻止保存', async () => {
+  const wrapper = await openDialog({ id: 'web_1', title: '示例', url: 'https://example.com', quick: false, quickRegex: '[abc' })
+  assert.equal(wrapper.find('.quick-regex-input').exists(), false)
+  await wrapper.find('form').trigger('submit')
+  assert.equal(wrapper.emitted('save')[0][0].quickRegex, '[abc')
+})
+
 test('没填标题时报错且不保存', async () => {
   const wrapper = await openDialog({ id: 'web_1', title: '示例', url: 'https://example.com' })
   const title = wrapper.findAll('.web-preview-fields input')[0]

@@ -105,7 +105,7 @@ function request(url, { method = 'GET', headers = {}, body = '', timeout = 10000
       let received = 0
       const finish = () => {
         const payload = Buffer.concat(chunks)
-        if (response.statusCode >= 200 && response.statusCode < 300 || method === 'MKCOL' && response.statusCode === 405) {
+        if (response.statusCode >= 200 && response.statusCode < 300 || method === 'MKCOL' && response.statusCode === 405 || method === 'HEAD' && [405, 501].includes(response.statusCode)) {
           done({ status: response.statusCode, url: target.href, headers: response.headers, body: binary ? payload : payload.toString('utf8') })
         } else fail(new Error(`${context}: ${response.statusCode} ${response.statusMessage || '请求失败'}`))
       }
@@ -193,7 +193,7 @@ function iconCandidates(html, pageUrl) {
     } catch {
       continue
     }
-    if (!['http:', 'https:'].includes(resolved.protocol)) continue
+    if (!['http:', 'https:'].includes(resolved.protocol) || resolved.origin !== new URL(pageUrl).origin) continue
     // 没写 sizes 的默认 favicon 多是 16/32，apple-touch-icon 按惯例是 180。
     const size = largestSize(attribute(tag, 'sizes')) || (rel.includes('apple-touch-icon') ? 180 : 32)
     found.push({ url: resolved.href, size })
@@ -231,8 +231,8 @@ function imageMime(buffer) {
   return ''
 }
 
-async function downloadIcon(url) {
-  const result = await request(url, { headers: ICON_HEADERS, timeout: ICON_TIMEOUT, binary: true, maxBytes: ICON_BYTES })
+async function downloadIcon(url, origin) {
+  const result = await request(url, { headers: ICON_HEADERS, timeout: ICON_TIMEOUT, allowedOrigin: origin, binary: true, maxBytes: ICON_BYTES })
   if (!result.body.length) return ''
   const mime = imageMime(result.body)
   return mime ? `data:${mime};base64,${result.body.toString('base64')}` : ''
@@ -323,7 +323,9 @@ window.funlink = {
   },
   async checkUrl(url) {
     const result = await request(url, { method: 'HEAD' })
-    return result.status
+    return [405, 501].includes(result.status)
+      ? (await request(result.url, { maxBytes: 1 })).status
+      : result.status
   },
   /**
    * 抓取网址对应站点的图标，返回 data URL；抓不到返回空串。
@@ -341,14 +343,14 @@ window.funlink = {
     let html = ''
     let base = page.href
     try {
-      const result = await request(page.href, { headers: ICON_HEADERS, timeout: ICON_TIMEOUT, maxBytes: ICON_HTML_BYTES })
+      const result = await request(page.href, { headers: ICON_HEADERS, timeout: ICON_TIMEOUT, allowedOrigin: page.origin, maxBytes: ICON_HTML_BYTES })
       html = result.body
       // 相对地址要按重定向落地后的地址解析，否则 example.com -> www.example.com 这类会解错。
       base = result.url
     } catch { /* 继续走兜底候选 */ }
     for (const candidate of iconCandidates(html, base)) {
       try {
-        const dataUrl = await downloadIcon(candidate.url)
+        const dataUrl = await downloadIcon(candidate.url, new URL(base).origin)
         if (dataUrl) return dataUrl
       } catch { /* 这张拿不到就试下一张 */ }
     }

@@ -41,7 +41,7 @@ export function setupUtoolsHost({ state, search, openLink, addBookmark, dismissK
       const bookmark = state.value.bookmarks.find(item => item.id === quickTarget)
       if (bookmark) {
         // 等 openLink 结束再退出，否则关键词还没输入插件就被关掉了。
-        await openLink(bookmark, payload)
+        await openLink(bookmark, action.type === 'text' ? '' : payload)
         window.utools?.outPlugin?.()
       }
       return

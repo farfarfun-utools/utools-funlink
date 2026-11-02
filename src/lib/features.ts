@@ -1,9 +1,15 @@
 import { bookmarkIconUrl } from './image'
+import { hasQueryPlaceholder } from './core'
 import type { Bookmark } from './types'
 
 // 「网页快开」会把卡片注册成 uTools 的功能入口，code 统一用这个前缀。
 // 整体替换数据时按前缀就能认出哪些入口是本插件注册的。
 const PREFIX = 'open-link@'
+
+export function quickRegexMatch(pattern: string): string | null {
+  if (!pattern.trim() || pattern.length > 200) return null
+  try { return new RegExp(pattern.trim()).toString() } catch { return null }
+}
 
 /** 移除一张卡片的快开入口。卡片删除、移进废纸篓、关掉快开都要调。 */
 export function removeQuickFeature(id: string): void {
@@ -12,12 +18,14 @@ export function removeQuickFeature(id: string): void {
 
 /** 按卡片当前的 quick 状态注册或移除快开入口。 */
 export function syncQuickFeature(bookmark: Bookmark): void {
+  if (!bookmark.quick || bookmark.deletedAt) return removeQuickFeature(bookmark.id)
   if (!window.utools?.setFeature) return
-  if (!bookmark.quick) return removeQuickFeature(bookmark.id)
   // 带 {q} 的卡片要能接着输关键词，所以多注册一条 over 类型的指令。
-  const cmds: Feature['cmds'] = bookmark.url.includes('{q}')
+  const cmds: Feature['cmds'] = hasQueryPlaceholder(bookmark.url)
     ? [bookmark.title, { type: 'over', label: bookmark.title }]
     : [bookmark.title]
+  const match = quickRegexMatch(typeof bookmark.quickRegex === 'string' ? bookmark.quickRegex : '')
+  if (match) cmds.push({ type: 'regex', label: bookmark.title, match })
   // icon 用卡片自己的图标（uTools 的动态指令接受 data URL），这样主搜索框里
   // 一眼能看出是哪个网站，而不是一排一模一样的插件 logo。
   window.utools.setFeature({ code: `${PREFIX}${bookmark.id}`, description: `打开 ${bookmark.title}`, icon: bookmarkIconUrl(bookmark), mainHide: true, cmds })

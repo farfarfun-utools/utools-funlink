@@ -44,8 +44,7 @@ export function useIconAttachments({ state, storageError, saveState }: IconAttac
       bookmark.iconRef = ref
       delete bookmark.iconData
     })
-    saveState()
-    return moved.length
+    return saveState() ? moved.length : 0
   }
 
   /**

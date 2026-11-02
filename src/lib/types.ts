@@ -28,6 +28,7 @@ export interface Bookmark {
   browser?: BrowserMode
   favorite?: boolean
   quick?: boolean
+  quickRegex?: string
   note?: string
   hasNote?: boolean
   deletedAt?: number | null

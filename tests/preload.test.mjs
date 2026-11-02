@@ -26,6 +26,19 @@ test('checkUrl 对真实 HTTP 服务返回实际状态码', async () => {
   })
 })
 
+test('HEAD 被禁用时用受限 GET 复核，正常网页不报失效', async () => {
+  const methods = []
+  await withServer((req, res) => {
+    methods.push(req.method)
+    if (req.method === 'HEAD') { res.writeHead(405); return res.end() }
+    res.writeHead(200)
+    res.end('ok')
+  }, async base => {
+    assert.equal(await funlink.checkUrl(`${base}/page`), 200)
+    assert.deepEqual(methods, ['HEAD', 'GET'])
+  })
+})
+
 test('重定向跟随到达次数上限后明确报错，而不是死循环挂起（短链/死链场景）', async () => {
   await withServer((req, res) => {
     // 自己重定向自己，制造一个无限重定向循环。
@@ -58,6 +71,33 @@ test('fetchIcon 读 HTML 里声明的图标，返回 data URL', async () => {
     assert.equal(icon, `data:image/png;base64,${PNG.toString('base64')}`)
     // 16×16 放到卡片上会糊，应该先试尺寸更合适的那张。
     assert.deepEqual(requested, ['/', '/touch.png'])
+  })
+})
+
+test('网站声明的跨站图标不会被自动请求', async () => {
+  let thirdPartyRequests = 0
+  await withServer((_req, res) => { thirdPartyRequests++; res.end(PNG) }, async thirdParty => {
+    await withServer((req, res) => {
+      if (req.url === '/') return res.end(`<link rel="icon" href="${thirdParty}/track.png">`)
+      res.end(PNG)
+    }, async site => {
+      assert.ok((await funlink.fetchIcon(`${site}/`)).startsWith('data:image/png;base64,'))
+      assert.equal(thirdPartyRequests, 0)
+    })
+  })
+})
+
+test('同站图标重定向到跨站地址时也不会继续请求', async () => {
+  let thirdPartyRequests = 0
+  await withServer((_req, res) => { thirdPartyRequests++; res.end(PNG) }, async thirdParty => {
+    await withServer((req, res) => {
+      if (req.url === '/') return res.end('<link rel="icon" href="/icon.png">')
+      if (req.url === '/icon.png') { res.writeHead(302, { Location: `${thirdParty}/track.png` }); return res.end() }
+      res.end(PNG)
+    }, async site => {
+      assert.ok((await funlink.fetchIcon(`${site}/`)).startsWith('data:image/png;base64,'))
+      assert.equal(thirdPartyRequests, 0)
+    })
   })
 })
 

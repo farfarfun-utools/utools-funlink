@@ -206,7 +206,7 @@ test('导出备份时把图标还原成内联 data URL', async () => {
       ],
     }
 
-    const exported = withInlineIcons(state)
+    const exported = await withInlineIcons(state)
 
     // 只带附件 ID 的备份换一台设备恢复出来就是一堆空图标。
     assert.deepEqual(exported.bookmarks[0], { id: 'w1', title: 'A', url: 'https://a.com', iconType: 'image', iconData: PNG })
@@ -214,6 +214,18 @@ test('导出备份时把图标还原成内联 data URL', async () => {
     assert.deepEqual(exported.bookmarks[1], { id: 'w2', title: 'B', url: 'https://b.com', iconType: 'text' })
     assert.equal(exported.bookmarks[2], state.bookmarks[2], '没有图标附件的卡片原样带过去')
     assert.equal(state.bookmarks[0].iconRef, ref, '导出不该改动内存里的整库状态')
+  })
+})
+
+test('刚启动尚未预读图标时导出备份仍会从附件取出图片', async () => {
+  const host = fakeDb()
+  const ref = iconRefFor(PNG)
+  host.attachments.set(ref, { bytes: dataUrlToBytes(PNG).bytes, type: 'image/png' })
+  await withDb(host, async () => {
+    const state = { version: 1, bookmarks: [{ id: 'w1', title: 'A', url: 'https://a.com', iconType: 'image', iconRef: ref }] }
+    const exported = await withInlineIcons(state)
+    assert.equal(exported.bookmarks[0].iconData, PNG)
+    assert.equal(exported.bookmarks[0].iconType, 'image')
   })
 })
 

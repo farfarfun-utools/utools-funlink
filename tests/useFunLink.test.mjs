@@ -2,6 +2,7 @@ import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { useFunLink } from '../src/composables/useFunLink.ts'
+import { normalizeUrl } from '../src/lib/core.ts'
 import { cachedIcon, iconRefFor, resetIconStore } from '../src/lib/iconStore.ts'
 import { STORAGE_KEY } from '../src/lib/state.ts'
 
@@ -118,6 +119,7 @@ test('processDataFile(restore) 恢复后写不进存储时按失败返回并提�
     const backup = { ...emptyBackup(), bookmarks: [{ id: 'w1', title: '安全', url: 'https://example.com/' }] }
     const ok = api.processDataFile('restore', JSON.stringify(backup))
     assert.equal(ok, false)
+    assert.deepEqual(api.state.value.bookmarks, [], '恢复失败不能把未落盘的新整库留在界面里')
     assert.equal(api.toast.error, true)
     assert.ok(!api.toast.message.includes('备份已恢复'))
   })
@@ -150,25 +152,33 @@ test('processDataFile(import) 合并模式按网址去重，替换模式清空�
   })
 })
 
-test('exportBackup 用户取消确认框时不会真正导出', () => {
+test('exportBackup 用户取消确认框时不会真正导出', async () => {
   let saved = false
-  withEnv({ confirm: () => false, funlink: { saveBackup: () => { saved = true; return true } } }, () => {
+  await withEnv({ confirm: () => false, funlink: { saveBackup: () => { saved = true; return true } } }, async () => {
     const api = useFunLink()
-    api.exportBackup()
+    await api.exportBackup()
     assert.equal(saved, false)
   })
 })
 
-test('exportBackup 导出的内容是未加密的明文 JSON', () => {
+test('exportBackup 导出的内容是未加密的明文 JSON', async () => {
   let savedContent = null
-  withEnv({ confirm: () => true, funlink: { saveBackup: content => { savedContent = content; return true } } }, () => {
+  await withEnv({ confirm: () => true, funlink: { saveBackup: content => { savedContent = content; return true } } }, async () => {
     const api = useFunLink()
     api.saveBookmark({ title: '测试', url: 'https://example.com/' })
-    api.exportBackup()
+    await api.exportBackup()
     assert.ok(savedContent, 'saveBackup 应该被调用')
     const parsed = JSON.parse(savedContent)
     assert.equal(parsed.bookmarks[0].title, '测试')
     assert.equal(api.toast.message, '备份已导出')
+  })
+})
+
+test('取消 uTools 原生保存对话框时不触发浏览器下载', async () => {
+  await withEnv({ confirm: () => true, funlink: { saveBackup: () => false } }, async () => {
+    const api = useFunLink()
+    await api.exportBackup()
+    assert.notEqual(api.toast.message, '备份已导出')
   })
 })
 
@@ -184,6 +194,61 @@ test('saveState 写入失败时弹出错误提示，不把失败咽下去', () =
     assert.equal(api.toast.error, true)
     assert.ok(api.toast.message.includes('db is locked'), '提示里要带上底层原因')
     assert.ok(!api.toast.message.includes('已添加'), '成功提示不能盖掉错误提示，否则就是一次假成功')
+  })
+})
+
+test('保存失败不会让未落盘的卡片混入下一次成功写入', () => {
+  const disk = emptyBackup()
+  let fail = true
+  withEnv({ utools: { dbStorage: {
+    getItem: () => disk,
+    setItem: (_key, value) => { if (fail) throw new Error('db is locked'); Object.assign(disk, value) },
+  } } }, () => {
+    const api = useFunLink()
+    assert.equal(api.saveBookmark({ id: 'w1', title: '未保存', url: 'https://example.com/' }), false)
+    assert.equal(api.state.value.bookmarks.length, 0)
+    fail = false
+    api.setView('favorites')
+    assert.equal(disk.bookmarks.length, 0)
+  })
+})
+
+test('落盘失败时快开入口仍与历史数据一致', () => {
+  const seeded = { ...emptyBackup(), bookmarks: [
+    { id: 'old', title: '历史快开', url: 'https://old.example.com/', quick: true },
+    { id: 'plain', title: '普通卡片', url: 'https://plain.example.com/', quick: false },
+  ] }
+  const features = new Map([['open-link@old', { code: 'open-link@old' }]])
+  withEnv({ utools: {
+    dbStorage: {
+      getItem: key => (key === STORAGE_KEY ? seeded : null),
+      setItem: () => { throw new Error('db is locked') },
+    },
+    getFeatures: () => [...features.values()],
+    setFeature: feature => features.set(feature.code, feature),
+    removeFeature: code => features.delete(code),
+  } }, () => {
+    const api = useFunLink()
+    const unchanged = () => {
+      assert.deepEqual([...features.keys()], ['open-link@old'])
+      assert.deepEqual(api.state.value.bookmarks.map(item => [item.id, Boolean(item.quick), item.deletedAt || null]), [
+        ['old', true, null], ['plain', false, null],
+      ])
+    }
+
+    assert.equal(api.saveBookmark({ id: 'new', title: '未保存', url: 'https://new.example.com/', quick: true }), false)
+    unchanged()
+    api.toggleQuick(api.state.value.bookmarks[0])
+    unchanged()
+    api.toggleQuick(api.state.value.bookmarks[1])
+    unchanged()
+    api.moveToTrash(api.state.value.bookmarks[0])
+    unchanged()
+    api.deleteBookmark(api.state.value.bookmarks[0])
+    unchanged()
+    assert.equal(api.processDataFile('import', '<a href="https://new.example.com">新书签</a>', { mode: 'replace' }), false)
+    unchanged()
+    assert.deepEqual(seeded.bookmarks.map(item => item.id), ['old', 'plain'])
   })
 })
 
@@ -286,6 +351,47 @@ test('openLink 对 {q} 占位符做 encodeURIComponent，正确处理中文和 &
     assert.equal(opened.length, 1)
     assert.ok(opened[0].includes(encodeURIComponent('中文 & 符号')), '关键词必须被正确编码')
     assert.ok(!opened[0].includes('{q}'), '占位符必须被替换掉')
+  })
+})
+
+test('名称快开打开 {q} 模板时询问关键词，不把卡片名称当关键词', async () => {
+  let enterHandler = null
+  const opened = []
+  await withEnv({
+    funlink: { onEnter: handler => { enterHandler = handler }, openExternal: url => opened.push(url) },
+  }, async () => {
+    const api = useFunLink()
+    api.saveBookmark({ id: 'w1', title: '站内搜索', url: 'https://example.com/?q={q}', quick: true })
+    api.setupUtools({ addBookmark: () => {} })
+    const opening = enterHandler({ code: 'open-link@w1', type: 'text', payload: '站内搜索' })
+    assert.equal(api.keywordPrompt.visible, true)
+    api.resolveKeyword('实际关键词')
+    await opening
+    assert.deepEqual(opened, [`https://example.com/?q=${encodeURIComponent('实际关键词')}`])
+  })
+})
+
+test('正则快开把主搜索框命中的完整文本填入网址路径', async () => {
+  let enterHandler = null
+  const features = []
+  const opened = []
+  await withEnv({
+    utools: { setFeature: feature => features.push(feature), setExpandHeight: () => {}, outPlugin: () => {} },
+    funlink: { onEnter: handler => { enterHandler = handler }, openExternal: url => opened.push(url) },
+  }, async () => {
+    const api = useFunLink()
+    api.saveBookmark({
+      id: 'w1', title: '表格', url: normalizeUrl('https://map.intime.com/table/{q}'),
+      quick: true, quickRegex: '^v_algo_.*$',
+    })
+    assert.deepEqual(features[0].cmds, [
+      '表格', { type: 'over', label: '表格' },
+      { type: 'regex', label: '表格', match: '/^v_algo_.*$/' },
+    ])
+
+    api.setupUtools({ addBookmark: () => {} })
+    await enterHandler({ code: 'open-link@w1', type: 'regex', payload: 'v_algo_nlp_base_data' })
+    assert.deepEqual(opened, ['https://map.intime.com/table/v_algo_nlp_base_data'])
   })
 })
 
@@ -635,7 +741,7 @@ test('导出备份时把附件里的图标还原成内联 data URL', async () =>
     await settle()
     assert.equal(api.state.value.bookmarks[0].iconRef, iconRefFor(SHARED_ICON), '先确认图标真的挪进了附件')
 
-    api.exportBackup()
+    await api.exportBackup()
 
     const parsed = JSON.parse(savedContent)
     assert.equal(parsed.bookmarks[0].iconData, SHARED_ICON)
@@ -728,6 +834,13 @@ test('open_bookmark 按 id 打开，{q} 卡片缺关键词时报错而不是挂�
 
     await tools.get('open_bookmark')({ id: 'tpl', query: '关键字' })
     assert.ok(opened[1].includes(encodeURIComponent('关键字')))
+  })
+})
+
+test('open_bookmark 识别旧版编码路径里的查询占位符', async () => {
+  await withTools({}, async (api, tools) => {
+    api.saveBookmark({ id: 'tpl', title: '旧模板', url: 'https://example.com/%7Bq%7D' })
+    await assert.rejects(() => tools.get('open_bookmark')({ id: 'tpl' }), /query 参数/)
   })
 })
 

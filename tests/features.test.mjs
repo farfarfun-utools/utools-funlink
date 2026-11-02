@@ -75,12 +75,38 @@ test('带 {q} 的卡片多注册一条 over 指令，好让用户接着输关键
   assert.deepEqual(utools.features[0].cmds, ['站内搜索', { type: 'over', label: '站内搜索' }])
 })
 
+test('自定义正则作为快开的额外指令，网址中的斜杠会正确转义', () => {
+  const utools = withUtools(fakeUtools())
+
+  syncQuickFeature({ id: 'w1', title: '文档', url: 'https://doc.example.com/', quick: true, quickRegex: '^https?://docs\\.example\\.com/' })
+
+  assert.deepEqual(utools.features[0].cmds, ['文档', { type: 'regex', label: '文档', match: '/^https?:\\/\\/docs\\.example\\.com\\//' }])
+})
+
+test('旧数据中无效的快开正则不会影响名称指令', () => {
+  const utools = withUtools(fakeUtools())
+
+  syncQuickFeature({ id: 'w1', title: '文档', url: 'https://doc.example.com/', quick: true, quickRegex: '[abc' })
+
+  assert.deepEqual(utools.features[0].cmds, ['文档'])
+})
+
 test('关掉快开就把入口移除', () => {
   const utools = withUtools(fakeUtools([{ code: 'open-link@w1' }]))
 
   syncQuickFeature({ id: 'w1', title: '文档', url: 'https://doc.example.com/', quick: false })
 
   assert.deepEqual(utools.features, [])
+})
+
+test('宿主暂时没有 setFeature 时仍能移除关闭或删除的入口', () => {
+  const removed = []
+  withUtools({ removeFeature: code => removed.push(code) })
+
+  syncQuickFeature({ id: 'w1', title: '文档', url: 'https://example.com/', quick: false })
+  syncQuickFeature({ id: 'w2', title: '已删除', url: 'https://example.com/', quick: true, deletedAt: 1 })
+
+  assert.deepEqual(removed, ['open-link@w1', 'open-link@w2'])
 })
 
 test('宿主没有 setFeature 时什么都不做，也不抛错', () => {

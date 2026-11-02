@@ -220,7 +220,8 @@ export async function sweepIcons(keep: Set<string>): Promise<number> {
  * 备份要能在别的设备、别的安装上单独恢复，只带附件 ID 的备份换个地方就是一堆空图标。
  * 读不到的（附件已经不在了）就连 iconType 一起退回文字图标，而不是留个空圆圈。
  */
-export function withInlineIcons(state: AppState): AppState {
+export async function withInlineIcons(state: AppState): Promise<AppState> {
+  await warmIcons(iconRefsOf(state.bookmarks))
   return {
     ...state,
     bookmarks: state.bookmarks.map((bookmark): Bookmark => {

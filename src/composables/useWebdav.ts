@@ -24,9 +24,9 @@ export interface WebdavDeps {
   /** 往界面上报一句话，第二个参数为真表示这是错误。 */
   onMessage: (text: string, error?: boolean) => void
   /** 取当前要备份的内容。做成函数是为了点下备份那一刻才序列化。 */
-  backupContent: () => string
+  backupContent: () => Promise<string>
   /** 从 WebDav 上拉回来的备份内容，交给调用方走正常的还原流程。 */
-  onRestore: (content: string) => void
+  onRestore: (content: string) => boolean
 }
 
 export function useWebdav({ onMessage, backupContent, onRestore }: WebdavDeps) {
@@ -41,7 +41,9 @@ export function useWebdav({ onMessage, backupContent, onRestore }: WebdavDeps) {
 
   /** 密码在存储里是加密的，这里只写加密后的串，内存里的明文不落盘。 */
   async function write() {
-    writeStorage(WEBDAV_KEY, { host: config.host, username: config.username, secret: await encryptSecret(config.password) })
+    const result = writeStorage(WEBDAV_KEY, { host: config.host, username: config.username, secret: await encryptSecret(config.password) })
+    if (!result.ok) onMessage(result.message || 'WebDav 配置保存失败', true)
+    return result.ok
   }
 
   async function read() {
@@ -76,10 +78,11 @@ export function useWebdav({ onMessage, backupContent, onRestore }: WebdavDeps) {
       if (new URL(config.host).protocol !== 'https:') throw new Error('WebDAV 服务器必须使用 HTTPS')
     } catch {
       onMessage('请输入有效的 HTTPS WebDAV 地址', true)
-      return
+      return false
     }
-    await write()
+    if (!await write()) return false
     onMessage('设置已保存！')
+    return true
   }
 
   /**
@@ -115,7 +118,7 @@ export function useWebdav({ onMessage, backupContent, onRestore }: WebdavDeps) {
     if (!window.confirm('导出内容为明文，可能包含网址、笔记和设置。确认上传到 WebDav？')) return
     loading.value = true
     try {
-      await found.webdavBackup(plain(), backupContent())
+      await found.webdavBackup(plain(), await backupContent())
       onMessage('备份到WebDav成功！')
     } catch (error) {
       onMessage(`WebDav操作失败：${reason(error)}`, true)
@@ -146,8 +149,7 @@ export function useWebdav({ onMessage, backupContent, onRestore }: WebdavDeps) {
     const found = bridge()
     if (!found) return false
     try {
-      onRestore(await found.webdavRestore(plain(), file.href))
-      return true
+      return onRestore(await found.webdavRestore(plain(), file.href))
     } catch (error) {
       onMessage(`还原失败：${reason(error)}`, true)
       return false

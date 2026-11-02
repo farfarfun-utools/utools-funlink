@@ -1,5 +1,6 @@
 import type { Ref } from 'vue'
 import { fetchSiteIcon } from '../lib/image'
+import { hasQueryPlaceholder } from '../lib/core'
 import { buildBookmark, describeBookmark, findBookmark, findByUrl, listCategories, searchBookmarks } from '../lib/tools'
 import type { AppState, Bookmark } from '../lib/types'
 
@@ -52,7 +53,7 @@ export function registerAiTools({ state, saveBookmark, openLink }: AiToolsOption
     const query = String(params.query ?? '').trim()
     // 带 {q} 的卡片要靠关键词补全网址。界面上会弹对话框问用户，但 Agent 这条路上没人回答，
     // 等于把调用挂死在那里，所以直接报错让它带上 query 重试。
-    if (!query && bookmark.url.includes('{q}')) {
+    if (!query && hasQueryPlaceholder(bookmark.url)) {
       throw new Error(`“${bookmark.title}”是搜索类网址，请在 query 参数里给出搜索关键词`)
     }
     await openLink(bookmark, query)

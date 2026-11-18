@@ -618,6 +618,19 @@ function fakeIconDb() {
 // 这三步之间只有 await，没有定时器，所以一个宏任务之后必然都跑完了。
 const settle = () => new Promise(resolve => setTimeout(resolve, 0))
 
+test('读取书签失败时保留数据库中的图标附件', async () => {
+  const host = fakeIconDb()
+  const ref = iconRefFor(SHARED_ICON)
+  host.attachments.set(ref, { bytes: Uint8Array.of(1), type: 'image/webp' })
+  await withEnv({ utools: host, seeded: { version: 99 } }, async () => {
+    const api = useFunLink()
+    assert.ok(api.storageError.value)
+    api.setupUtools({ addBookmark: () => {} })
+    await settle()
+    assert.ok(host.attachments.has(ref))
+  })
+})
+
 // 图标原先整串 data URL 存在整库文档里，几十张图片图标就能把 1MB 的单文档顶满。
 test('启动时把内联图标挪进附件，同一张图只存一份', async () => {
   resetIconStore()

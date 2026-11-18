@@ -10,7 +10,7 @@ FunLink 是一个面向 uTools 的网址收藏与快速访问插件。它把零�
 
 ## UPXS 安装与发布
 
-从 [v1.0.3 Release](https://github.com/farfarfun-utools/utools-funlink/releases/tag/v1.0.3) 下载 `utools-funlink-1.0.3.upxs`，导入 uTools 使用。也可在成功的 CI 中下载 `utools-funlink-upxs` 附件。打包链路已由用户在 FunCalc 上验证；本插件的实机安装与功能仍需分别确认。
+从 [v1.0.4 Release](https://github.com/farfarfun-utools/utools-funlink/releases/tag/v1.0.4) 下载 `utools-funlink-1.0.4.upxs`，导入 uTools 使用。也可在成功的 CI 中下载 `utools-funlink-upxs` 附件。打包链路已由用户在 FunCalc 上验证；本插件的实机安装与功能仍需分别确认。
 
 项目根目录 [`identity.json`](identity.json) 明文维护官方项目 ID `zvghtljr`。`mid`、`uid`、`cellphone` 由 `farfarfun-utools` 组织的 `UTOOLS_MID`、`UTOOLS_UID`、`UTOOLS_CELLPHONE` Secrets 注入，不写入公开配置。CI 和 Release 统一调用固定版本的 [utools-devtools](https://github.com/farfarfun-action/utools-devtools)，生成 `.upxs` 与 `SHA256SUMS`，PR 不执行身份打包。
 
@@ -84,7 +84,8 @@ Agent 调用时机不在用户视野里，误删整库的代价远大于省下�
 
 ### 隐私
 
-插件不会把收藏内容发送到任何第三方服务。卡片图标不走任何第三方 favicon 服务：
+书签保存在 uTools 数据库中。开启 uTools 数据同步后，书签可随账号同步到其他设备。
+手动执行 WebDAV 备份时，插件会将备份上传到你配置的服务器。卡片图标直接从收藏的网站获取：
 自动抓取时只请求你收藏的那个站点本身（页面里声明的图标和 `/favicon.ico`），
 抓到的图压缩后存在本地，之后渲染卡片不再联网。不想抓的话在设置里关掉「自动抓取图标」即可。
 

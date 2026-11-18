@@ -54,7 +54,7 @@ export function useIconAttachments({ state, storageError, saveState }: IconAttac
    * 而卡片上的图标得尽快显示出来。
    */
   async function syncIconAttachments(): Promise<void> {
-    if (!iconStoreAvailable()) return
+    if (storageError.value || !iconStoreAvailable()) return
     await offloadIcons()
     await warmIcons(iconRefsOf(state.value.bookmarks))
     // 废纸篓里的卡片也算还在引用：恢复出来之后图标得还在。

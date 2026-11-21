@@ -30,12 +30,16 @@ if (diff < 0) {
 echo "=== install dependencies ==="
 pnpm install --frozen-lockfile
 
-echo "=== check source ==="
-pnpm lint
-pnpm typecheck
+if [ "${SKIP_CHECKS:-0}" = "1" ]; then
+  echo "SKIP_CHECKS=1: 跳过 lint / typecheck / test"
+else
+  echo "=== check source ==="
+  pnpm lint
+  pnpm typecheck
 
-echo "=== test source ==="
-pnpm test
+  echo "=== test source ==="
+  pnpm test
+fi
 
 node --check "$PLUGIN_DIR/preload.js"
 node -e "const plugin = JSON.parse(require('fs').readFileSync('$PLUGIN_DIR/plugin.json', 'utf8')); if (plugin.version !== require('./package.json').version) throw new Error('Version mismatch')"

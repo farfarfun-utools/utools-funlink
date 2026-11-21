@@ -7,8 +7,9 @@ withDefaults(defineProps<{
   activeRootId: string
   theme: string
   rounded?: number
-}>(), { rounded: 36 })
-const emit = defineEmits(['select', 'manage', 'cycle-theme', 'settings'])
+  trashCount?: number
+}>(), { rounded: 36, trashCount: 0 })
+const emit = defineEmits(['select', 'manage', 'empty-trash', 'cycle-theme', 'settings'])
 </script>
 
 <template>
@@ -29,6 +30,20 @@ const emit = defineEmits(['select', 'manage', 'cycle-theme', 'settings'])
         <i class="iconfont icon-fly" aria-hidden="true" />
       </button>
       <span class="nav-spacer" />
+      <button
+        class="round-button trash-button"
+        :class="{ active: currentView === 'trash' }"
+        type="button"
+        aria-label="打开废纸篓"
+        title="废纸篓"
+        @click.stop="emit('select', 'trash')"
+        @contextmenu.prevent.stop="emit('empty-trash')"
+      >
+        <span class="trash-badge">
+          <i class="iconfont icon-dust" aria-hidden="true" />
+          <sup v-if="trashCount">{{ trashCount }}</sup>
+        </span>
+      </button>
       <button class="round-button theme-button" type="button" title="切换主题" aria-label="切换主题" @click.stop="emit('cycle-theme')">
         <i class="iconfont" :class="theme === 'dark' ? 'icon-dark' : theme === 'light' ? 'icon-light' : 'icon-system'" aria-hidden="true" />
       </button>

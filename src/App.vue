@@ -36,7 +36,7 @@ const specialView = computed(() => ({
   inbox: { label: '收集箱', icon: 'icon-inbox', help: '没有指定分类的卡片都先落在这里' },
   favorites: { label: '常用', icon: 'icon-card', help: '右键卡片「加入常用」的都会出现在这里' },
   quick: { label: '网页快开', icon: 'icon-fly', help: '在 uTools 主搜索框直接输入卡片名称就能打开' },
-  trash: { label: '废纸篓', icon: 'icon-dust', help: '移除的卡片暂存在这里，右键左下角图标可清空' },
+  trash: { label: '废纸篓', icon: 'icon-dust', help: '移除的卡片暂存在这里，右键顶部废纸篓图标可清空' },
 }[state.value.currentView] || null))
 
 const contextItems = computed(() => {
@@ -138,8 +138,10 @@ onBeforeUnmount(() => {
       :active-root-id="activeRootId"
       :theme="state.theme"
       :rounded="state.settings.navbar.rounded"
+      :trash-count="trashCount"
       @select="funlink.setView"
       @manage="openCategoryContextMenu"
+      @empty-trash="funlink.emptyTrash"
       @cycle-theme="funlink.cycleTheme"
       @settings="settingsDialog?.open()"
     />
@@ -179,13 +181,6 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </main>
-
-    <button class="trash-button" type="button" aria-label="打开废纸篓" title="废纸篓" @click="funlink.setView('trash')" @contextmenu.prevent="funlink.emptyTrash">
-      <span class="trash-badge">
-        <i class="iconfont icon-dust" aria-hidden="true" />
-        <sup v-if="trashCount">{{ trashCount }}</sup>
-      </span>
-    </button>
 
     <ContextMenu v-if="context.visible" :items="contextItems" :x="context.x" :y="context.y" @select="handleContextAction" />
     <div v-if="toast.visible" class="toast" :class="{ error: toast.error }" role="status" aria-live="polite">{{ toast.message }}</div>

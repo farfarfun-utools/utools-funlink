@@ -47,7 +47,13 @@ const icon = useBookmarkIcon(() => props.bookmark)
       @keydown.enter="emit('open', bookmark)"
       @keydown.space.prevent="emit('open', bookmark)"
     >
-      <h2 :title="bookmark.title">{{ bookmark.title }}</h2>
+      <div class="bookmark-heading">
+        <h2 :title="bookmark.title">{{ bookmark.title }}</h2>
+        <span v-if="bookmark.favorite || bookmark.quick" class="bookmark-badges">
+          <i v-if="bookmark.favorite" class="iconfont icon-card bookmark-badge" title="常用" aria-hidden="true" />
+          <i v-if="bookmark.quick" class="iconfont icon-quick-fill bookmark-badge" title="网页快开" aria-hidden="true" />
+        </span>
+      </div>
       <p :title="bookmark.description || displayHost(bookmark.url)">
         <i v-if="bookmark.hasNote || bookmark.note" class="iconfont icon-remarks note-mark" aria-hidden="true" />
         <span>{{ bookmark.description || displayHost(bookmark.url) }}</span>

@@ -6,7 +6,7 @@
 // 故意不提供删除卡片、清空废纸篓、恢复备份这类破坏性操作：工具一旦开给第三方
 // Agent，调用时机就不在用户视野里了，误删整库的代价远大于省下的几次点击。
 
-import { bookmarkMatches, createId, displayHost, initials, normalizeUrl } from './core'
+import { bookmarkMatches, createId, displayHost, initials, isHttpUrl, normalizeUrl, urlsOf } from './core'
 import { categoryIdsOf } from './state'
 import type { AppState, Bookmark } from './types'
 
@@ -68,17 +68,22 @@ function clampLimit(value: unknown): number {
   return Math.min(Math.floor(limit), MAX_LIMIT)
 }
 
+function asParams(params: unknown): Record<string, unknown> {
+  return params && typeof params === 'object' ? params as Record<string, unknown> : {}
+}
+
 /**
  * 按关键词搜收藏。关键词留空就返回收藏列表的开头几条。
  * 匹配字段跟界面搜索保持一致（settings.search），结果里不含废纸篓的卡片。
  */
-export function searchBookmarks(state: AppState, params: Record<string, unknown> = {}): { total: number, bookmarks: ToolBookmark[] } {
-  const keyword = String(params.keyword ?? '').trim()
+export function searchBookmarks(state: AppState, params: unknown = {}): { total: number, bookmarks: ToolBookmark[] } {
+  const safe = asParams(params)
+  const keyword = String(safe.keyword ?? '').trim()
   const matched = state.bookmarks.filter(bookmark => !bookmark.deletedAt && bookmarkMatches(bookmark, keyword, state.settings.search))
   // total 给的是命中总数而不是返回条数，AI 据此判断要不要换个更准的关键词。
   return {
     total: matched.length,
-    bookmarks: matched.slice(0, clampLimit(params.limit)).map(bookmark => describeBookmark(state, bookmark)),
+    bookmarks: matched.slice(0, clampLimit(safe.limit)).map(bookmark => describeBookmark(state, bookmark)),
   }
 }
 
@@ -109,18 +114,21 @@ export function resolveCategoryId(state: AppState, value: unknown): string {
   return matched.id
 }
 
-/** 按 AI 给的参数拼出一张待保存的卡片；网址非法时抛错。 */
-export function buildBookmark(state: AppState, params: Record<string, unknown> = {}): Bookmark {
-  // normalizeUrl 会补协议并挡掉 javascript: 之类，错误信息本身就能直接给 AI 看。
-  const url = normalizeUrl(params.url)
-  const title = String(params.title ?? '').trim() || displayHost(url)
-  const categoryId = resolveCategoryId(state, params.category)
+/** 按 AI 给的参数拼出一张待保存的卡片；网址非法或非 http(s) 时抛错。 */
+export function buildBookmark(state: AppState, params: unknown = {}): Bookmark {
+  const safe = asParams(params)
+  // normalizeUrl 会补协议并挡掉 javascript: 之类；AI/MCP 工具额外收紧为仅允许 http/https，
+  // 禁止借 AI 工具往收藏里写入 file: 本地路径或 ftp: 地址。
+  const url = normalizeUrl(safe.url)
+  if (!isHttpUrl(url)) throw new Error('AI 工具仅支持 http 和 https 网址')
+  const title = String(safe.title ?? '').trim() || displayHost(url)
+  const categoryId = resolveCategoryId(state, safe.category)
   return {
     // 自己生成 id 而不是让保存链路生成，返回值里才能带上它，AI 后续能直接按 id 打开。
     id: createId('bookmark-tool'),
     title,
     url,
-    description: String(params.description ?? '').trim() || displayHost(url),
+    description: String(safe.description ?? '').trim() || displayHost(url),
     categoryId,
     categoryIds: [categoryId],
     // 不指定配色：safeColor 会回落到默认色，不值得为此再抄一份调色板。
@@ -136,20 +144,29 @@ export function buildBookmark(state: AppState, params: Record<string, unknown> =
   }
 }
 
+/** 校验卡片是否允许被 AI/MCP 工具打开：主网址和附加网址必须全部为 http(s)。 */
+export function assertAiOpenableBookmark(bookmark: Bookmark): void {
+  const urls = urlsOf(bookmark)
+  if (!urls.length || !urls.every(isHttpUrl)) {
+    throw new Error('AI 工具仅支持打开 http 和 https 网址')
+  }
+}
+
 /** 库里是否已有同网址的卡片。Agent 失败重试很常见，同一个网址不该收藏出两张卡片。 */
 export function findByUrl(state: AppState, url: string): Bookmark | undefined {
   return state.bookmarks.find(bookmark => !bookmark.deletedAt && bookmark.url === url)
 }
 
 /** 按 id 或关键词定位一张卡片，定位不到就抛错让 AI 换参数重试。 */
-export function findBookmark(state: AppState, params: Record<string, unknown> = {}): Bookmark {
-  const id = String(params.id ?? '').trim()
+export function findBookmark(state: AppState, params: unknown = {}): Bookmark {
+  const safe = asParams(params)
+  const id = String(safe.id ?? '').trim()
   if (id) {
     const matched = state.bookmarks.find(bookmark => bookmark.id === id && !bookmark.deletedAt)
     if (!matched) throw new Error(`没有找到 id 为 ${id} 的网址`)
     return matched
   }
-  const keyword = String(params.keyword ?? '').trim()
+  const keyword = String(safe.keyword ?? '').trim()
   if (!keyword) throw new Error('请给出 id 或 keyword，用来指定要打开哪个网址')
   // 取第一条而不是报「有多条匹配」：收藏列表本身是按用户排的序，最靠前的最符合预期。
   const matched = state.bookmarks.find(bookmark => !bookmark.deletedAt && bookmarkMatches(bookmark, keyword, state.settings.search))

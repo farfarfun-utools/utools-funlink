@@ -49,6 +49,36 @@ function handleKeydown(event: KeyboardEvent) {
   }
 }
 
+function handlePaste(event: ClipboardEvent) {
+  const clipboard = event.clipboardData
+  if (!clipboard) return
+  event.preventDefault()
+  const html = clipboard.getData('text/html')
+  const text = clipboard.getData('text/plain')
+  const fragment = html
+    ? sanitizeNoteHtml(html)
+    : (() => {
+        const docFragment = document.createDocumentFragment()
+        docFragment.appendChild(document.createTextNode(text))
+        return docFragment
+      })()
+  const selection = window.getSelection()
+  if (selection && selection.rangeCount > 0 && editor.value?.contains(selection.anchorNode)) {
+    const range = selection.getRangeAt(0)
+    range.deleteContents()
+    const lastNode = fragment.lastChild
+    range.insertNode(fragment)
+    if (lastNode) {
+      range.setStartAfter(lastNode)
+      range.collapse(true)
+      selection.removeAllRanges()
+      selection.addRange(range)
+    }
+  } else {
+    editor.value?.appendChild(fragment)
+  }
+}
+
 defineExpose({ open, close })
 </script>
 
@@ -66,7 +96,7 @@ defineExpose({ open, close })
         <span class="note-description">{{ bookmark.description }}</span>
         <button type="button" class="note-close" aria-label="关闭" @click="close">×</button>
       </header>
-      <div ref="editor" class="note-editor prose" contenteditable="true" role="textbox" aria-label="笔记内容" aria-multiline="true" spellcheck="true" />
+      <div ref="editor" class="note-editor prose" contenteditable="true" role="textbox" aria-label="笔记内容" aria-multiline="true" spellcheck="true" @paste="handlePaste" />
       <footer class="note-footer">
         <div class="note-footer-spacer" />
         <div class="note-footer-content">

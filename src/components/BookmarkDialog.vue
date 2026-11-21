@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
-import { initials, isAbsoluteUrl, isHttpUrl, normalizeUrl, safeColor } from '../lib/core'
+import { initials, isAbsoluteUrl, isHttpUrl, normalizeUrl, safeColor, stripQueryPlaceholder } from '../lib/core'
 import { bookmarkIcon, loadIcon } from '../lib/iconStore'
 import { fetchSiteIcon, toIconDataUrl } from '../lib/image'
 import { quickRegexMatch } from '../lib/features'
@@ -140,7 +140,7 @@ async function fetchIcon(url: string, { force = false } = {}) {
   fetchingIcon.value = true
   // 搜索类网址带着 {q} 占位符，原样请求是个无意义的地址；
   // 去掉占位符后站点首页和 /favicon.ico 兜底都还在。
-  const icon = await fetchSiteIcon(url.replaceAll('{q}', ''))
+  const icon = await fetchSiteIcon(stripQueryPlaceholder(url))
   // 抓的这几秒里用户可能又改了网址，或者把弹窗关掉开了另一张卡片，
   // 那这张图就不是当前这条网址的图标了，丢掉。
   if (form.url.trim() !== url) return

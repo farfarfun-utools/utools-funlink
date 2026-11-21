@@ -1,20 +1,74 @@
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
+import dns from 'node:dns'
 import http from 'node:http'
 
 // preload.js 在模块顶层调用 utools.onPluginEnter，必须在 import 之前先把
 // 全局 utools / window 占位好，否则一加载就会因为 utools 未定义而报错。
-globalThis.utools = { onPluginEnter: () => {} }
+const externalCalls = []
+globalThis.utools = {
+  onPluginEnter: () => {},
+  shellOpenExternal: url => externalCalls.push(url),
+}
 globalThis.window = {}
 await import('../utools/preload.js')
 const funlink = globalThis.window.funlink
 
-function withServer(handler, run) {
+// 测试专用的公网模拟域名表：让 preload 内的 SSRF 校验照常对真实公网 IP (93.184.216.34) 生效，
+// 仅在测试文件里把指向该模拟 IP 的 TCP 连接转发回本地临时 HTTP 服务器。
+const TEST_PUBLIC_IP = '93.184.216.34'
+const virtualDns = new Map()
+const originalLookup = dns.promises.lookup.bind(dns.promises)
+dns.promises.lookup = async (hostname, options) => {
+  const mapped = virtualDns.get(String(hostname).toLowerCase())
+  if (mapped) {
+    return options && typeof options === 'object' && options.all
+      ? mapped
+      : mapped[0]
+  }
+  return originalLookup(hostname, options)
+}
+
+const originalHttpRequest = http.request.bind(http)
+http.request = function wrappedRequest(url, options, callback) {
+  if (options && typeof options === 'object' && typeof options.lookup === 'function') {
+    const innerLookup = options.lookup
+    options = {
+      ...options,
+      lookup(host, opts, cb) {
+        const finish = typeof opts === 'function' ? opts : cb
+        const reqOpts = typeof opts === 'function' ? {} : opts
+        innerLookup(host, reqOpts, (err, addr, family) => {
+          if (err) return finish(err)
+          if (Array.isArray(addr)) {
+            return finish(null, addr.map(item => (
+              item.address === TEST_PUBLIC_IP ? { address: '127.0.0.1', family: 4 } : item
+            )))
+          }
+          if (addr === TEST_PUBLIC_IP) return finish(null, '127.0.0.1', 4)
+          return finish(null, addr, family)
+        })
+      },
+    }
+  }
+  return originalHttpRequest(url, options, callback)
+}
+
+let serverSeq = 0
+function withServer(handler, run, { host, hosts = [] } = {}) {
+  const primaryHost = host || `site-${++serverSeq}.example.test`
+  const registered = [primaryHost, ...hosts].map(h => h.toLowerCase())
+  for (const h of registered) virtualDns.set(h, [{ address: TEST_PUBLIC_IP, family: 4 }])
   return new Promise((resolve, reject) => {
     const server = http.createServer(handler)
     server.listen(0, '127.0.0.1', () => {
       const { port } = server.address()
-      run(`http://127.0.0.1:${port}`).then(resolve, reject).finally(() => server.close())
+      run(`http://${primaryHost}:${port}`, port)
+        .then(resolve, reject)
+        .finally(() => {
+          for (const h of registered) virtualDns.delete(h)
+          server.close()
+        })
     })
   })
 }
@@ -240,4 +294,74 @@ test('WebDAV cannot delete a same-origin file outside the backup directory', asy
   const config = { host: 'https://example.test/remote/', username: 'u', password: 'p' }
   await assert.rejects(() => funlink.webdavDelete(config, '/remote/other.json'), /备份目录/)
   await assert.rejects(() => funlink.webdavDelete(config, '/remote/FunLink/%2e%2e/other.json'), /备份目录/)
+})
+
+test('checkUrl 与 fetchIcon 阻止本机、内网 IP 与解析到私网的域名（SSRF 防护）', async () => {
+  const blockedUrls = [
+    'http://localhost:8080/',
+    'http://api.localhost/',
+    'http://127.0.0.1:8080/',
+    'http://10.0.0.1/',
+    'http://172.16.0.1/',
+    'http://192.168.1.1/',
+    'http://169.254.169.254/latest/meta-data/',
+    'http://0.0.0.0/',
+    'http://[::1]/',
+    'http://[fc00::1]/',
+    'http://[fe80::1]/',
+    'file:///etc/passwd',
+  ]
+  for (const url of blockedUrls) {
+    await assert.rejects(() => funlink.checkUrl(url), /禁止访问|仅支持/, `checkUrl 应拦截 ${url}`)
+    assert.equal(await funlink.fetchIcon(url), '', `fetchIcon 应拦截 ${url}`)
+  }
+
+  // DNS 解析到内网 IP 时也必须被拦住
+  virtualDns.set('rebind.example.test', [{ address: '127.0.0.1', family: 4 }])
+  try {
+    await assert.rejects(() => funlink.checkUrl('http://rebind.example.test/'), /禁止访问/)
+    assert.equal(await funlink.fetchIcon('http://rebind.example.test/'), '')
+  } finally {
+    virtualDns.delete('rebind.example.test')
+  }
+})
+
+test('fetchIcon 允许 example.com 重定向到 www.example.com，同时拦住重定向到私网', async () => {
+  await withServer((req, res) => {
+    const hostHeader = String(req.headers.host || '')
+    if (hostHeader.startsWith('example.com:') && req.url === '/') {
+      const port = hostHeader.split(':')[1]
+      res.writeHead(302, { Location: `http://www.example.com:${port}/` })
+      return res.end()
+    }
+    if (req.url === '/') {
+      res.writeHead(200, { 'Content-Type': 'text/html' })
+      return res.end('<html><head><link rel="icon" href="/logo.png"></head></html>')
+    }
+    res.writeHead(200, { 'Content-Type': 'image/png' })
+    res.end(PNG)
+  }, async base => {
+    const icon = await funlink.fetchIcon(`${base}/`)
+    assert.equal(icon, `data:image/png;base64,${PNG.toString('base64')}`)
+  }, { host: 'example.com', hosts: ['www.example.com'] })
+
+  await withServer((req, res) => {
+    res.writeHead(302, { Location: 'http://127.0.0.1:80/secret' })
+    res.end()
+  }, async base => {
+    assert.equal(await funlink.fetchIcon(`${base}/`), '')
+  })
+})
+
+test('openExternal 拒绝非法、空字符串、以 - 开头或含控制字符的 URL', () => {
+  externalCalls.length = 0
+  funlink.openExternal('', '')
+  funlink.openExternal(null, '')
+  funlink.openExternal('--gpu-launcher=evil', 'chrome')
+  funlink.openExternal('https://example.com/\n--evil', 'chrome')
+  funlink.openExternal('javascript:alert(1)', '')
+  assert.deepEqual(externalCalls, [])
+
+  funlink.openExternal('https://example.com/', '')
+  assert.deepEqual(externalCalls, ['https://example.com/'])
 })

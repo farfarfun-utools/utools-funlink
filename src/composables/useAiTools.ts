@@ -1,7 +1,7 @@
 import type { Ref } from 'vue'
 import { fetchSiteIcon } from '../lib/image'
 import { hasQueryPlaceholder } from '../lib/core'
-import { buildBookmark, describeBookmark, findBookmark, findByUrl, listCategories, searchBookmarks } from '../lib/tools'
+import { assertAiOpenableBookmark, buildBookmark, describeBookmark, findBookmark, findByUrl, listCategories, searchBookmarks } from '../lib/tools'
 import type { AppState, Bookmark } from '../lib/types'
 
 /** 注册工具所需的回调，由组合式函数提供。 */
@@ -49,8 +49,11 @@ export function registerAiTools({ state, saveBookmark, openLink }: AiToolsOption
   })
 
   window.utools.registerTool('open_bookmark', async params => {
-    const bookmark = findBookmark(state.value, params)
-    const query = String(params.query ?? '').trim()
+    const safe = params && typeof params === 'object' ? params as Record<string, unknown> : {}
+    const bookmark = findBookmark(state.value, safe)
+    // AI / MCP 调用不允许触发 file: 等本地协议，哪怕用户收藏里有本地文件卡片。
+    assertAiOpenableBookmark(bookmark)
+    const query = String(safe.query ?? '').trim()
     // 带 {q} 的卡片要靠关键词补全网址。界面上会弹对话框问用户，但 Agent 这条路上没人回答，
     // 等于把调用挂死在那里，所以直接报错让它带上 query 重试。
     if (!query && hasQueryPlaceholder(bookmark.url)) {

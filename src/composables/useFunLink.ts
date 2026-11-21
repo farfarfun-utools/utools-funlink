@@ -6,7 +6,7 @@ import { createId, moveCategory, moveItem, normalizeCategoryIds } from '../lib/c
 import { removeQuickFeature, resetQuickFeatures, syncQuickFeature } from '../lib/features'
 import { iconRefFor, storeIcon } from '../lib/iconStore'
 import { STORAGE_KEY, categoryIdsOf, loadState } from '../lib/state'
-import { commitStorage, readStorage, serializeForStorage } from '../lib/storage'
+import { commitStorage, readLocalView, readStorage, serializeForStorage, writeLocalView } from '../lib/storage'
 import * as views from '../lib/views'
 import type { AppState, Bookmark, Category, CategoryAction } from '../lib/types'
 import type { IconUpdate } from '../lib/icons'
@@ -29,11 +29,31 @@ export function useFunLink() {
   const search = ref('')
   const { toast, showToast } = useToast()
   const { keywordPrompt, askKeyword, resolveKeyword } = useKeywordPrompt()
+
+  function applyLocalView(target: AppState, view = readLocalView()) {
+    if (!view) return
+    const validCategory = (id: string) => target.categories.some(category => category.id === id)
+    if (view.currentView) {
+      if (view.currentView.startsWith('category:')) {
+        if (validCategory(view.currentView.slice(9))) target.currentView = view.currentView
+      } else {
+        target.currentView = view.currentView
+      }
+    }
+    if (view.lastCategoryId && validCategory(view.lastCategoryId)) {
+      target.lastCategoryId = view.lastCategoryId
+    }
+  }
+
+  if (!loaded.blocked && !loaded.empty) applyLocalView(state.value)
+
   let lastSavedJson = ''
   let lastGoodJson = serializeForStorage(state.value).json
 
   function restoreLastGoodState() {
+    const localView = { currentView: state.value.currentView, lastCategoryId: state.value.lastCategoryId }
     state.value = JSON.parse(lastGoodJson) as AppState
+    applyLocalView(state.value, localView)
     applyTheme()
     resetQuickFeatures(state.value.bookmarks)
   }
@@ -86,7 +106,7 @@ export function useFunLink() {
       state.value.lastCategoryId = firstChild?.id || categoryId
     } else state.value.currentView = view
     search.value = ''
-    saveState()
+    writeLocalView({ currentView: state.value.currentView, lastCategoryId: state.value.lastCategoryId })
   }
 
   /** 新增或更新一张卡片。返回是否真的写进了存储，AI 工具据此判断要不要报错。 */
@@ -261,7 +281,10 @@ export function useFunLink() {
         if (!bookmark.categoryIds.length) bookmark.categoryIds = ['cat@default']
         bookmark.categoryId = bookmark.categoryIds[0]
       })
-      if (descendants.has(activeCategoryId.value)) state.value.currentView = 'inbox'
+      if (descendants.has(activeCategoryId.value)) {
+        state.value.currentView = 'inbox'
+        writeLocalView({ currentView: state.value.currentView, lastCategoryId: state.value.lastCategoryId })
+      }
     }
     if (action.type === 'position') category.tabPosition = action.position
     if (action.type === 'move') state.value.categories = moveCategory(state.value.categories, id, action.parentId, action.targetId)
@@ -295,6 +318,29 @@ export function useFunLink() {
     syncIcons: () => { void syncIconAttachments() },
   })
 
+  function reloadFromSync(docs: DbDoc[]) {
+    const stateTouched = !Array.isArray(docs) || !docs.length || docs.some(doc => {
+      const id = String(doc?._id || '')
+      return id === STORAGE_KEY || id.endsWith(`/${STORAGE_KEY}`) || id.endsWith(STORAGE_KEY)
+    })
+    const iconTouched = Array.isArray(docs) && docs.some(doc => String(doc?._id || '').startsWith('icon@'))
+    if (stateTouched) {
+      const pulled = loadState({ read: readStorage })
+      if (!pulled.blocked && !pulled.empty) {
+        const localView = { currentView: state.value.currentView, lastCategoryId: state.value.lastCategoryId }
+        applyLocalView(pulled.state, localView)
+        state.value = pulled.state
+        storageError.value = ''
+        const snapshot = serializeForStorage(state.value)
+        lastSavedJson = snapshot.json
+        lastGoodJson = snapshot.json
+        applyTheme()
+        resetQuickFeatures(state.value.bookmarks)
+      }
+    }
+    if (stateTouched || iconTouched) void syncIconAttachments()
+  }
+
   function setupUtools({ addBookmark }: { addBookmark: (input: Partial<Bookmark>) => void }) {
     setupUtoolsHost({
       state,
@@ -303,6 +349,7 @@ export function useFunLink() {
       addBookmark,
       // 关键词对话框的 Promise 还挂着，不解决掉下次进来对话框还在。
       dismissKeyword: () => { if (keywordPrompt.visible) resolveKeyword('') },
+      onDbPull: reloadFromSync,
     })
     // 和宿主事件一起注册，都在页面初始化阶段：AI / MCP 调用不会触发进入插件事件，
     // 注册代码要是挂在那上面就永远不会执行。

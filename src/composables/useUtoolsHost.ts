@@ -21,16 +21,18 @@ export interface UtoolsHostOptions {
   addBookmark: (input: Partial<Bookmark>) => void
   /** 退出到后台时收尾挂着的关键词对话框。 */
   dismissKeyword: () => void
+  /** 跨设备云同步拉回数据后重新加载书签与设置。 */
+  onDbPull?: (docs: DbDoc[]) => void
 }
 
 /**
- * 注册与 uTools 宿主的全部交互：子输入框、快开入口、主搜索框推送、退出清理。
+ * 注册与 uTools 宿主的全部交互：子输入框、快开入口、主搜索框推送、退出清理、云同步拉取。
  *
  * 没有走 utools.onPluginReady：那个事件在插件加载完成时就触发了，而这里是渲染进程里
  * Vue 挂载之后才注册，赶不上也就不会再补发。进入插件相关的逻辑统一挂在
  * onEnter（preload 会补发注册前积压的 action）上，时序更确定。
  */
-export function setupUtoolsHost({ state, search, openLink, addBookmark, dismissKeyword }: UtoolsHostOptions) {
+export function setupUtoolsHost({ state, search, openLink, addBookmark, dismissKeyword, onDbPull }: UtoolsHostOptions) {
   window.utools?.setExpandHeight?.(PLUGIN_HEIGHT)
   window.utools?.setSubInput?.(({ text }) => { search.value = text || '' }, '搜索卡片', true)
 
@@ -83,4 +85,9 @@ export function setupUtoolsHost({ state, search, openLink, addBookmark, dismissK
     search.value = ''
     dismissKeyword()
   })
+
+  // 订阅云同步拉取事件：另一台设备修改书签后及时重新加载，避免本机继续拿旧内存覆盖云端。
+  if (onDbPull) {
+    window.utools?.onDbPull?.(docs => onDbPull(docs))
+  }
 }

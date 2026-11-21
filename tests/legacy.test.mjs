@@ -120,3 +120,18 @@ test('converted state passes the normal restore pipeline', () => {
 test('convertLegacyExport rejects a shape it cannot read', () => {
   assert.throws(() => convertLegacyExport({ db: 'nope' }), /网址精灵/)
 })
+
+test('convertLegacyExport rejects non-data:image icon payloads', () => {
+  const { state } = convertLegacyExport([
+    { _id: 'web_file', title: '本地图', url: 'https://a.example.com/', icon: { type: 'image', data: 'file:///etc/passwd' } },
+    { _id: 'web_js', title: '脚本图', url: 'https://b.example.com/', icon: { type: 'image', data: 'javascript:alert(1)' } },
+    { _id: 'web_ok', title: '正常图', url: 'https://c.example.com/', icon: { type: 'image', data: 'data:image/png;base64,AAAA' } },
+  ])
+  const byId = Object.fromEntries(state.bookmarks.map(bookmark => [bookmark.id, bookmark]))
+  assert.equal(byId.web_file.iconType, 'text')
+  assert.equal(byId.web_file.iconData, '')
+  assert.equal(byId.web_js.iconType, 'text')
+  assert.equal(byId.web_js.iconData, '')
+  assert.equal(byId.web_ok.iconType, 'image')
+  assert.equal(byId.web_ok.iconData, 'data:image/png;base64,AAAA')
+})

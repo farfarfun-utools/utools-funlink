@@ -193,3 +193,17 @@ test('bookmarkIconUrl 有图片图标就用它，文字图标现画一张', () =
     assert.equal(bookmarkIconUrl({ title: '示例', iconType: 'image', iconData: '', icon: '示' }), 'data:image/png;base64,FALLBACK')
   })
 })
+
+test('textIconDataUrl 缓存设有上限，超量后会淘汰最早的条目', () => {
+  let draws = 0
+  withTextCanvas('data:image/png;base64,BOUNDED', calls => {
+    textIconDataUrl('K0', '#111111')
+    for (let index = 1; index <= 510; index += 1) {
+      textIconDataUrl(`K${index}`, '#111111')
+    }
+    draws = calls.text.length
+    // K0 早已被淘汰，再取需要重新画一次
+    textIconDataUrl('K0', '#111111')
+    assert.equal(calls.text.length, draws + 1)
+  })
+})

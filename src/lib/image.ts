@@ -95,7 +95,8 @@ export async function fetchSiteIcon(url: string): Promise<string> {
 const TEXT_ICON_EDGE = 64
 
 // 同一张卡片的图标会被反复要（主搜索框每敲一个字都要重算一遍推送列表），
-// 画一次存下来。键里带上文字和颜色，改了图标就自然算成另一张。
+// 画一次存下来。键里带上文字和颜色，改了图标就自然算成另一张。设上限避免缓存无限增长。
+const MAX_TEXT_ICONS = 500
 const textIcons = new Map<string, string>()
 
 /** 把「底色 + 文字」的图标画成 png data URL。画不出来（拿不到画布）返回空串。 */
@@ -124,6 +125,10 @@ export function textIconDataUrl(text: string, color: string): string {
     context.font = `500 ${Math.round(TEXT_ICON_EDGE * (text.length > 2 ? 0.3 : 0.44))}px sans-serif`
     context.fillText(text, center, center)
     const dataUrl = canvas.toDataURL('image/png')
+    if (textIcons.size >= MAX_TEXT_ICONS) {
+      const oldest = textIcons.keys().next().value
+      if (oldest !== undefined) textIcons.delete(oldest)
+    }
     textIcons.set(key, dataUrl)
     return dataUrl
   } catch {

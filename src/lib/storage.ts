@@ -24,6 +24,40 @@ export interface Snapshot {
 // 导出给批量抓图标用：那边要先算出还能塞下多少张图标（见 lib/icons.ts）。
 export const MAX_DOC_BYTES = 900 * 1024
 
+// 当前浏览的视图与最近分类只属于本机交互状态，存在 localStorage 而非 cloud dbStorage，
+// 避免每点一次标签页都触发全量云同步写盘。
+export const UI_VIEW_KEY = 'funlink-ui-view-v1'
+
+export interface LocalViewState {
+  currentView?: string
+  lastCategoryId?: string
+}
+
+export function readLocalView(): LocalViewState | null {
+  try {
+    if (typeof localStorage === 'undefined') return null
+    const raw = localStorage.getItem(UI_VIEW_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object') return null
+    return {
+      currentView: typeof parsed.currentView === 'string' ? parsed.currentView : undefined,
+      lastCategoryId: typeof parsed.lastCategoryId === 'string' ? parsed.lastCategoryId : undefined,
+    }
+  } catch {
+    return null
+  }
+}
+
+export function writeLocalView(view: LocalViewState): void {
+  try {
+    if (typeof localStorage === 'undefined') return
+    localStorage.setItem(UI_VIEW_KEY, JSON.stringify(view))
+  } catch {
+    // 无 localStorage 或隐私受限环境忽略
+  }
+}
+
 // uTools 内走 dbStorage，浏览器预览时退回 localStorage。
 // 统一从这里读写，避免同一份数据一半在 dbStorage、一半在 localStorage。
 function db(): DbStorage | null {

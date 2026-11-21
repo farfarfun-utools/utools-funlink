@@ -2,11 +2,22 @@
 set -eu
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-PLUGIN_DIR="$ROOT_DIR/utools"   # 打包目录，不含 .git
 cd "$ROOT_DIR"
+# 一律用相对路径喂给 node：CI 的 Windows 作业跑在 Git Bash 里，$ROOT_DIR 是 /d/a/... 这种
+# MSYS 路径，Windows 版 node 解析不了；而 node 继承的工作目录本来就是这里。
+PLUGIN_DIR=utools   # 打包目录，不含 .git
 
 command -v node >/dev/null || { echo "error: Node.js is required" >&2; exit 1; }
 command -v pnpm >/dev/null || { echo "error: pnpm is required (corepack enable)" >&2; exit 1; }
+
+# 版本只卡下限，不卡死某一个版本：低于 12 必须拦住（lockfile 为 pnpm 12 格式）。
+PNPM_VERSION=$(pnpm --version)
+PNPM_MAJOR=${PNPM_VERSION%%.*}
+if ! [ "$PNPM_MAJOR" -ge 12 ] 2>/dev/null; then
+  echo "error: pnpm >= 12 is required, found $PNPM_VERSION" >&2
+  echo "       run: corepack enable  (then pnpm follows package.json#packageManager)" >&2
+  exit 1
+fi
 
 # Node 的下限只写在 package.json#engines.node 一处，这里读它来卡 —— 原来这个脚本一个
 # 版本检查都没有，而测试用的 jsdom 30 自己要求 22.22.2+，版本不够的表现是所有 jsdom

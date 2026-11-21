@@ -303,24 +303,94 @@ test('clearCookies 在没有内置浏览器时直接报错，不假装成功', a
   assert.match(api.toast.message, /内置浏览器/)
 })
 
-// 一次保存就是整库全量落盘加一次云同步，空操作不该触发它。
-test('saveState 内容没变时不再重复落盘', () => {
+// 一次保存就是整库全量落盘加一次云同步，空操作与切换视图都不该触发它。
+test('saveState 内容没变时不再重复落盘，setView 只写 localStorage 不触发云同步', () => {
   let writes = 0
-  withEnv({ utools: { dbStorage: {
-    getItem: key => (key === STORAGE_KEY ? emptyBackup() : null),
-    setItem: () => { writes++ },
-  } } }, () => {
+  const local = new Map()
+  const prevLocalStorage = globalThis.localStorage
+  globalThis.localStorage = {
+    getItem: key => (local.has(key) ? local.get(key) : null),
+    setItem: (key, value) => local.set(key, String(value)),
+    removeItem: key => local.delete(key),
+  }
+  try {
+    withEnv({ utools: { dbStorage: {
+      getItem: key => (key === STORAGE_KEY ? emptyBackup() : null),
+      setItem: () => { writes++ },
+    } } }, () => {
+      const api = useFunLink()
+      api.setView('all')
+      api.setView('favorites')
+      assert.equal(writes, 0, '切换视图只写本机 localStorage，不应触发云端 dbStorage 重写')
+      assert.ok(local.size > 0, '当前视图应当持久化到 localStorage')
+
+      api.setTheme('dark')
+      const afterFirst = writes
+      assert.equal(afterFirst, 1, '真实改动要落盘')
+
+      api.setTheme('dark')
+      assert.equal(writes, afterFirst, '内容没变时不该重复写盘')
+
+      api.setTheme('light')
+      assert.equal(writes, afterFirst + 1, '内容真的变了还是要写')
+    })
+  } finally {
+    if (prevLocalStorage === undefined) delete globalThis.localStorage
+    else globalThis.localStorage = prevLocalStorage
+  }
+})
+
+test('onDbPull 拉取云端更新后会重载书签数据并保留本机当前视图', () => {
+  let pullHandler = null
+  const cloud = { ...emptyBackup(), bookmarks: [{ id: 'w1', title: '旧书签', url: 'https://old.example.com/' }] }
+  withEnv({
+    utools: {
+      setExpandHeight: () => {},
+      onDbPull: handler => { pullHandler = handler },
+      dbStorage: {
+        getItem: key => (key === STORAGE_KEY ? cloud : null),
+        setItem: () => {},
+      },
+    },
+  }, () => {
     const api = useFunLink()
-    api.setView('all')
-    const afterFirst = writes
-    assert.ok(afterFirst >= 1, '第一次切换视图要落盘')
-
-    api.setView('all')
-    api.setView('all')
-    assert.equal(writes, afterFirst, '重复切到同一个视图不该再写')
-
+    api.setupUtools({ addBookmark: () => {} })
     api.setView('favorites')
-    assert.equal(writes, afterFirst + 1, '内容真的变了还是要写')
+    assert.equal(typeof pullHandler, 'function')
+
+    cloud.bookmarks = [
+      { id: 'w1', title: '旧书签', url: 'https://old.example.com/' },
+      { id: 'w2', title: '另一台设备新增', url: 'https://sync.example.com/' },
+    ]
+    pullHandler([{ _id: STORAGE_KEY }])
+
+    assert.deepEqual(api.state.value.bookmarks.map(b => b.id), ['w1', 'w2'])
+    assert.equal(api.state.value.currentView, 'favorites', '同步重载后应保留本机当前视图')
+  })
+})
+
+test('processDataFile(restore) 恢复网址精灵旧备份时保留被跳过的无效网址计数', () => {
+  withEnv({}, () => {
+    const api = useFunLink()
+    const legacyDocs = [
+      { _id: 'web_1', title: '安全', url: 'https://safe.example.com', catIds: [] },
+      { _id: 'web_2', title: '危险', url: 'javascript:alert(1)', catIds: [] },
+    ]
+    const ok = api.processDataFile('restore', JSON.stringify(legacyDocs))
+    assert.equal(ok, true)
+    assert.match(api.toast.message, /已跳过 1 条无效网址/)
+  })
+})
+
+test('AI 工具拒绝添加或打开 file: 协议卡片，且能安全处理 null 参数', async () => {
+  const opened = []
+  await withTools({ funlink: { openExternal: url => opened.push(url) } }, async (api, tools) => {
+    api.saveBookmark({ id: 'local', title: '本地文件', url: 'file:///etc/passwd' })
+    await assert.rejects(() => tools.get('add_bookmark')({ url: 'file:///etc/passwd' }), /仅支持 http 和 https/)
+    await assert.rejects(() => tools.get('open_bookmark')({ id: 'local' }), /仅支持打开 http 和 https/)
+    await assert.rejects(() => tools.get('open_bookmark')(null), /id 或 keyword/)
+    assert.equal(tools.get('search_bookmarks')(null).total, 1)
+    assert.deepEqual(opened, [])
   })
 })
 

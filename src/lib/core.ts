@@ -205,14 +205,19 @@ export function isSafeUrl(value: unknown): boolean {
 /** 从浏览器书签 HTML 中提取去重后的网址。 */
 export function parseBookmarkHtml(html: string): { title: string, url: string }[] {
   const document = new DOMParser().parseFromString(html, 'text/html')
-  return [...document.querySelectorAll('a[href]')].flatMap((anchor): { title: string, url: string }[] => {
+  const seen = new Set<string>()
+  const result: { title: string, url: string }[] = []
+  for (const anchor of document.querySelectorAll('a[href]')) {
     try {
       const url = normalizeUrl(anchor.getAttribute('href'))
-      return [{ title: anchor.textContent?.trim() || new URL(url).hostname, url }]
+      if (seen.has(url)) continue
+      seen.add(url)
+      result.push({ title: anchor.textContent?.trim() || new URL(url).hostname, url })
     } catch {
-      return []
+      // 跳过协议不安全或格式非法的链接
     }
-  }).filter((bookmark, index, all) => all.findIndex(item => item.url === bookmark.url) === index)
+  }
+  return result
 }
 
 /** 取网址的源（协议 + 域名 + 端口），解析不出来时返回空串。 */

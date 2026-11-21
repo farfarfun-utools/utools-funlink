@@ -12,6 +12,7 @@ import emptyDarkImage from '../assets/empty-dark.svg'
 import type { IconBackfill } from '../composables/useIconBackfill'
 import { useLinkCheck } from '../composables/useLinkCheck'
 import { useWebdav } from '../composables/useWebdav'
+import { isSafeUrl } from '../lib/core'
 import { withInlineIcons } from '../lib/iconStore'
 import type { WebDavFile } from '../lib/webdav'
 import type { AppState, Bookmark, Settings } from '../lib/types'
@@ -158,6 +159,13 @@ function kilobytes(bytes: number) {
   return `${Math.round(bytes / 1024)}KB`
 }
 
+function openExternalLink(url: string) {
+  if (!isSafeUrl(url)) return
+  if (window.funlink?.openExternal) window.funlink.openExternal(url, '')
+  else if (window.utools?.shellOpenExternal) window.utools.shellOpenExternal(url)
+  else window.open(url, '_blank', 'noopener,noreferrer')
+}
+
 defineExpose({ open, close })
 </script>
 
@@ -293,12 +301,12 @@ defineExpose({ open, close })
       <div class="invalid-tabs"><button :class="{ active: invalidTab === 'results' }" type="button" @click="invalidTab = 'results'">扫描结果</button><button :class="{ active: invalidTab === 'ignored' }" type="button" @click="invalidTab = 'ignored'">忽略名单</button></div>
       <template v-if="invalidTab === 'results'">
         <div class="invalid-summary">共需检查 <b>{{ checkCandidates.length }}</b> 条链接，<template v-if="scanning">正在检查第 <b>{{ scanned }}</b> 个，已查到 <b>{{ invalidResults.length }}</b> 条无效链接，请稍后...</template><template v-else>点击按钮后开始检查无效链接。</template></div>
-        <div v-if="invalidResults.length" class="invalid-result-list"><div v-for="item in invalidResults" :key="item.id"><span>{{ item.title }}</span><a :href="item.url">{{ item.url }}</a><em>{{ item.message }}</em><button type="button" @click="ignoreLink(item)">忽略</button></div></div>
+        <div v-if="invalidResults.length" class="invalid-result-list"><div v-for="item in invalidResults" :key="item.id"><span>{{ item.title }}</span><a :href="item.url" @click.prevent="openExternalLink(item.url)">{{ item.url }}</a><em>{{ item.message }}</em><button type="button" @click="ignoreLink(item)">忽略</button></div></div>
         <div v-else class="invalid-empty"><img class="empty-image-light" :src="emptyImage" alt="" /><img class="empty-image-dark" :src="emptyDarkImage" alt="" /><span>提示：由于个别站点原因，扫描结果可能有小误差！</span></div>
       </template>
       <template v-else>
         <div class="invalid-summary">已忽略 <b>{{ ignoredLinks.length }}</b> 条链接 <span>如果个别网址检查不准确，请加入忽略检查白名单</span></div>
-        <div v-if="ignoredLinks.length" class="invalid-result-list"><div v-for="(item, index) in ignoredLinks" :key="item.url"><span>{{ item.title }}</span><a :href="item.url">{{ item.url }}</a><button type="button" @click="unignoreLink(index)">取消</button></div></div>
+        <div v-if="ignoredLinks.length" class="invalid-result-list"><div v-for="(item, index) in ignoredLinks" :key="item.url"><span>{{ item.title }}</span><a :href="item.url" @click.prevent="openExternalLink(item.url)">{{ item.url }}</a><button type="button" @click="unignoreLink(index)">取消</button></div></div>
         <div v-else class="invalid-empty"><img class="empty-image-light" :src="emptyImage" alt="" /><img class="empty-image-dark" :src="emptyDarkImage" alt="" /><span>暂无数据</span></div>
       </template>
     </template>
@@ -339,7 +347,7 @@ defineExpose({ open, close })
         <span>连已有图片图标的卡片一起重新抓</span>
       </label>
       <div v-if="backfill.failures.length" class="icon-fetch-list">
-        <div v-for="item in backfill.failures" :key="item.id"><span>{{ item.title }}</span><a :href="item.url">{{ item.url }}</a><em>{{ item.reason }}</em></div>
+        <div v-for="item in backfill.failures" :key="item.id"><span>{{ item.title }}</span><a :href="item.url" @click.prevent="openExternalLink(item.url)">{{ item.url }}</a><em>{{ item.reason }}</em></div>
       </div>
       <div v-else class="invalid-empty">
         <img class="empty-image-light" :src="emptyImage" alt="" /><img class="empty-image-dark" :src="emptyDarkImage" alt="" />

@@ -10,6 +10,7 @@ import { removeQuickFeature, resetQuickFeatures } from '../lib/features'
 import { withInlineIcons } from '../lib/iconStore'
 import { convertLegacyExport, isLegacyExport } from '../lib/legacy'
 import { prepareState } from '../lib/state'
+import { writeLocalView } from '../lib/storage'
 import type { AppState, Bookmark, Category } from '../lib/types'
 
 /** 导入书签 / 恢复备份时可带的选项。 */
@@ -56,18 +57,20 @@ export function useDataTransfer({ state, storageError, saveState, showToast, app
       return
     }
     const link = document.createElement('a')
-    link.href = URL.createObjectURL(new Blob([content], { type: 'application/json' }))
+    const href = URL.createObjectURL(new Blob([content], { type: 'application/json' }))
+    link.href = href
     link.download = `funlink-${new Date().toISOString().slice(0, 10)}.json`
     link.click()
-    URL.revokeObjectURL(link.href)
+    setTimeout(() => URL.revokeObjectURL(href), 1000)
     showToast('备份已导出')
   }
 
   function restoreBackup(content: string): boolean {
     const parsed = JSON.parse(content)
     // 既接受 FunLink 自己的备份，也接受「网址精灵」导出的 { db, flyDb } / 裸数组。
-    const source = isLegacyExport(parsed) ? convertLegacyExport(parsed).state : parsed
-    const { state: restored, dropped } = prepareState(source)
+    const legacy = isLegacyExport(parsed) ? convertLegacyExport(parsed) : null
+    const { state: restored, dropped: preparedDropped } = prepareState(legacy ? legacy.state : parsed)
+    const dropped = (legacy?.dropped || 0) + preparedDropped
     const previousQuickIds = state.value.bookmarks.filter(bookmark => bookmark.quick).map(bookmark => bookmark.id)
     state.value = restored
     // 恢复成功即说明拿到了可用数据，可以解除只读保护。
@@ -118,8 +121,10 @@ export function useDataTransfer({ state, storageError, saveState, showToast, app
     })
     state.value.bookmarks.push(...bookmarks)
     state.value.currentView = `category:${categoryId}`
+    state.value.lastCategoryId = categoryId
     const saved = saveState()
     if (saved) {
+      writeLocalView({ currentView: state.value.currentView, lastCategoryId: state.value.lastCategoryId })
       previousQuickIds.forEach(removeQuickFeature)
       // 整库替换模式下原来那批卡片连图标一起没了，它们的附件要清掉。
       if (options.mode === 'replace') syncIcons()

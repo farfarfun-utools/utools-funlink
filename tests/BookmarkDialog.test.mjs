@@ -183,6 +183,20 @@ test('填完网址后自动去站点抓一张图标填进表单', async () => {
   }
 })
 
+test('抓图标时也会去掉已编码的 %7Bq%7D 占位符', async () => {
+  const requested = []
+  const restore = stubIconPipeline(async url => { requested.push(url); return RAW_ICON })
+  try {
+    const wrapper = await openDialog()
+    await wrapper.find('.bookmark-url-input').setValue('https://example.com/search?q=%7Bq%7D')
+    await vi.advanceTimersByTimeAsync(AFTER_FETCH)
+    await settle()
+    assert.deepEqual(requested, ['https://example.com/search?q='])
+  } finally {
+    restore()
+  }
+})
+
 test('设置里关掉自动抓取后，填网址不会访问那个站点', async () => {
   const requested = []
   const restore = stubIconPipeline(async url => { requested.push(url); return RAW_ICON })

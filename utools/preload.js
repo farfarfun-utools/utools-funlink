@@ -1,6 +1,8 @@
+const dns = require('dns')
 const fs = require('fs')
 const http = require('http')
 const https = require('https')
+const net = require('net')
 const path = require('path')
 const { spawn } = require('child_process')
 
@@ -12,8 +14,25 @@ utools.onPluginEnter(action => {
   else enterQueue.push(action)
 })
 
+function validateExternalUrl(url) {
+  if (typeof url !== 'string') return ''
+  const trimmed = url.trim()
+  if (!trimmed || trimmed.startsWith('-')) return ''
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f]/.test(trimmed)) return ''
+  try {
+    const parsed = new URL(trimmed)
+    if (!['http:', 'https:', 'ftp:', 'file:'].includes(parsed.protocol)) return ''
+  } catch {
+    return ''
+  }
+  return trimmed
+}
+
 function openWithBrowser(url, browser) {
-  if (!browser) return utools.shellOpenExternal(url)
+  const safeUrl = validateExternalUrl(url)
+  if (!safeUrl) return
+  if (!browser) return utools.shellOpenExternal(safeUrl)
 
   const platform = process.platform
   const commands = {
@@ -41,15 +60,93 @@ function openWithBrowser(url, browser) {
     },
   }
   const command = commands[platform]?.[browser]
-  if (!command) return utools.shellOpenExternal(url)
+  if (!command) return utools.shellOpenExternal(safeUrl)
 
   try {
-    const child = spawn(command[0], [...command[1], url], { detached: true, stdio: 'ignore' })
-    child.once('error', () => utools.shellOpenExternal(url))
+    const child = spawn(command[0], [...command[1], safeUrl], { detached: true, stdio: 'ignore' })
+    child.once('error', () => utools.shellOpenExternal(safeUrl))
     child.unref()
   } catch {
-    utools.shellOpenExternal(url)
+    utools.shellOpenExternal(safeUrl)
   }
+}
+
+const DEFAULT_MAX_BYTES = 16 * 1024 * 1024
+
+function isBlockedIpv4(ip) {
+  const parts = ip.split('.').map(Number)
+  if (parts.length !== 4 || parts.some(part => !Number.isInteger(part) || part < 0 || part > 255)) return true
+  const [a, b] = parts
+  if (a === 0 || a === 10 || a === 127) return true
+  if (a === 169 && b === 254) return true
+  if (a === 172 && b >= 16 && b <= 31) return true
+  if (a === 192 && b === 168) return true
+  return false
+}
+
+function isBlockedIp(rawIp) {
+  const ip = String(rawIp || '').trim().toLowerCase().replace(/^\[|\]$/g, '').split('%')[0]
+  const version = net.isIP(ip)
+  if (version === 4) return isBlockedIpv4(ip)
+  if (version === 6) {
+    if (ip === '::' || ip === '::1') return true
+    if (ip.startsWith('fc') || ip.startsWith('fd')) return true
+    if (/^fe[89ab]/i.test(ip)) return true
+    if (ip.startsWith('::ffff:')) {
+      const mapped = ip.slice(7)
+      if (net.isIP(mapped) === 4) return isBlockedIpv4(mapped)
+      const hex = mapped.split(':')
+      if (hex.length === 2 && hex.every(part => /^[0-9a-f]{1,4}$/.test(part))) {
+        const hi = parseInt(hex[0], 16)
+        const lo = parseInt(hex[1], 16)
+        return isBlockedIpv4(`${(hi >> 8) & 255}.${hi & 255}.${(lo >> 8) & 255}.${lo & 255}`)
+      }
+      return true
+    }
+    return false
+  }
+  return true
+}
+
+function isBlockedHostname(hostname) {
+  const host = String(hostname || '').trim().toLowerCase().replace(/\.+$/, '')
+  if (!host || host === 'localhost' || host.endsWith('.localhost')) return true
+  const bare = host.replace(/^\[|\]$/g, '')
+  if (net.isIP(bare)) return isBlockedIp(bare)
+  return false
+}
+
+async function resolvePublicTarget(target) {
+  if (!['http:', 'https:'].includes(target.protocol)) {
+    throw new Error('仅支持 http 和 https 网址')
+  }
+  if (isBlockedHostname(target.hostname)) {
+    throw new Error('禁止访问本机或内网地址')
+  }
+  const bare = target.hostname.replace(/^\[|\]$/g, '')
+  if (net.isIP(bare)) {
+    return { address: bare, family: net.isIP(bare) }
+  }
+  const records = await dns.promises.lookup(bare, { all: true })
+  if (!Array.isArray(records) || !records.length) {
+    throw new Error('域名解析失败')
+  }
+  for (const record of records) {
+    if (isBlockedIp(record.address)) {
+      throw new Error('禁止访问本机或内网地址')
+    }
+  }
+  return { address: records[0].address, family: records[0].family || net.isIP(records[0].address) }
+}
+
+function canonicalIconHost(hostname) {
+  return String(hostname || '').trim().toLowerCase().replace(/^www\./, '')
+}
+
+function isSameIconSite(baseUrl, candidateUrl) {
+  if (!['http:', 'https:'].includes(candidateUrl.protocol)) return false
+  return canonicalIconHost(candidateUrl.hostname) === canonicalIconHost(baseUrl.hostname)
+    && candidateUrl.port === baseUrl.port
 }
 
 function requestContext(method, target) {
@@ -69,37 +166,82 @@ function requestError(context, error) {
  * 发一个 HTTP(S) 请求。
  *
  * `binary` 为 true 时 body 是 Buffer（抓图标要的是原始字节，转 utf8 会把图弄坏）。
- * `maxBytes` 是响应体上限，超了之后的处理按 body 类型分：文本截断就够用
- * （抓图标只需要 HTML 的 `<head>`），而截断的二进制是一张坏图，只能当失败。
+ * `maxBytes` 是响应体上限（默认 16MB）。`truncateOnLimit` 为 true 时（如抓图标 HTML 的 `<head>`
+ * 或探活受限 GET）超限后直接按已读内容结算；否则（二进制图标、WebDAV 备份等）直接报错。
+ * `publicOnly` 为 true 时执行公网 SSRF 防护（拦截本机/内网地址及解析到私网 IP 的域名）；
+ * 用户自建 WebDAV 不开启此限制以支持局域网同步。
  * 解析结果带上 `url`，因为跟完重定向后相对地址要按落地的地址解析。
  */
-function request(url, { method = 'GET', headers = {}, body = '', timeout = 10000, redirects = 3, allowedOrigin, binary = false, maxBytes = 0 } = {}) {
+async function request(url, {
+  method = 'GET',
+  headers = {},
+  body = '',
+  timeout = 10000,
+  redirects = 3,
+  allowedOrigin,
+  allowTarget,
+  publicOnly = false,
+  binary = false,
+  maxBytes = DEFAULT_MAX_BYTES,
+  truncateOnLimit = false,
+} = {}) {
+  let target
+  try {
+    target = new URL(url)
+  } catch (error) {
+    throw requestError(`${method} 无效地址`, error)
+  }
+  if (!['http:', 'https:'].includes(target.protocol)) {
+    throw new Error(`${method} 仅支持 http 和 https 协议`)
+  }
+  if (allowedOrigin && target.origin !== allowedOrigin) throw new Error(`${method} WebDAV 地址必须与配置服务器同源`)
+  if (allowTarget && !allowTarget(target)) throw new Error(`${method} 拒绝重定向到跨站地址`)
+
+  const context = requestContext(method, target)
+  let lookup
+  if (publicOnly) {
+    const resolved = await resolvePublicTarget(target)
+    lookup = (_hostname, options, callback) => {
+      const cb = typeof options === 'function' ? options : callback
+      if (options && typeof options === 'object' && options.all) {
+        cb(null, [{ address: resolved.address, family: resolved.family }])
+      } else {
+        cb(null, resolved.address, resolved.family)
+      }
+    }
+  }
+
   return new Promise((resolve, reject) => {
-    // 结算只认第一次。超限这条路上一次请求会被结算两回：先 destroy 再给结果，而
-    // destroy 掉的请求随后还会冒一个 aborted 错误走到下面的 req.on('error')。
-    // Promise 本身会忽略第二次，但那样就只能靠「反正忽略」兜着，行为也不好读；
-    // 显式拦住之后，截断的文本仍然算成功，不会被 aborted 盖成失败。
+    // 结算只认第一次。超限这条路上一次请求会被结算两回：先结算再 destroy，而
+    // destroy 掉的请求随后还会冒一个 aborted/error 事件。显式拦住之后，
+    // 截断的文本仍然算成功，不会被 aborted 盖成失败。
     let settled = false
     const done = value => { if (!settled) { settled = true; resolve(value) } }
     const fail = error => { if (!settled) { settled = true; reject(error) } }
 
-    let target
-    try {
-      target = new URL(url)
-    } catch (error) {
-      return fail(requestError(`${method} 无效地址`, error))
-    }
-    if (allowedOrigin && target.origin !== allowedOrigin) return fail(new Error(`${method} WebDAV 地址必须与配置服务器同源`))
-    const context = requestContext(method, target)
     const client = target.protocol === 'https:' ? https : http
-    const req = client.request(target, { method, headers }, response => {
+    const req = client.request(target, { method, headers, ...(lookup ? { lookup } : {}) }, response => {
       if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location && redirects) {
         response.resume()
+        let nextUrl
         try {
-          return done(request(new URL(response.headers.location, target).href, { method, headers, body, timeout, redirects: redirects - 1, allowedOrigin, binary, maxBytes }))
+          nextUrl = new URL(response.headers.location, target).href
         } catch (error) {
           return fail(requestError(context, error))
         }
+        return done(request(nextUrl, {
+          method,
+          headers,
+          body,
+          timeout,
+          redirects: redirects - 1,
+          allowedOrigin,
+          allowTarget,
+          publicOnly,
+          binary,
+          maxBytes,
+          truncateOnLimit,
+        }))
       }
       const chunks = []
       let received = 0
@@ -115,10 +257,16 @@ function request(url, { method = 'GET', headers = {}, body = '', timeout = 10000
         chunks.push(chunk)
         received += chunk.length
         if (!maxBytes || received <= maxBytes) return
-        response.destroy()
-        if (binary) fail(new Error(`${context}: 响应超过 ${Math.round(maxBytes / 1024)}KB 上限`))
-        else finish()
+        if (truncateOnLimit && !binary) {
+          finish()
+          response.destroy()
+        } else {
+          fail(new Error(`${context}: 响应超过 ${Math.round(maxBytes / 1024)}KB 上限`))
+          response.destroy()
+        }
       })
+      response.on('error', error => fail(requestError(context, error)))
+      response.on('aborted', () => fail(new Error(`${context}: 连接被中断`)))
       response.on('end', finish)
     })
     req.setTimeout(timeout, () => req.destroy(new Error(`${timeout / 1000}秒超时`)))
@@ -193,7 +341,7 @@ function iconCandidates(html, pageUrl) {
     } catch {
       continue
     }
-    if (!['http:', 'https:'].includes(resolved.protocol) || resolved.origin !== new URL(pageUrl).origin) continue
+    if (!isSameIconSite(new URL(pageUrl), resolved)) continue
     // 没写 sizes 的默认 favicon 多是 16/32，apple-touch-icon 按惯例是 180。
     const size = largestSize(attribute(tag, 'sizes')) || (rel.includes('apple-touch-icon') ? 180 : 32)
     found.push({ url: resolved.href, size })
@@ -231,8 +379,15 @@ function imageMime(buffer) {
   return ''
 }
 
-async function downloadIcon(url, origin) {
-  const result = await request(url, { headers: ICON_HEADERS, timeout: ICON_TIMEOUT, allowedOrigin: origin, binary: true, maxBytes: ICON_BYTES })
+async function downloadIcon(url, baseUrl) {
+  const result = await request(url, {
+    headers: ICON_HEADERS,
+    timeout: ICON_TIMEOUT,
+    allowTarget: target => isSameIconSite(baseUrl, target),
+    publicOnly: true,
+    binary: true,
+    maxBytes: ICON_BYTES,
+  })
   if (!result.body.length) return ''
   const mime = imageMime(result.body)
   return mime ? `data:${mime};base64,${result.body.toString('base64')}` : ''
@@ -322,9 +477,9 @@ window.funlink = {
     await webdavRequest(config, webdavFileUrl(config, href), { method: 'DELETE', headers: webdavHeaders(config) })
   },
   async checkUrl(url) {
-    const result = await request(url, { method: 'HEAD' })
+    const result = await request(url, { method: 'HEAD', publicOnly: true })
     return [405, 501].includes(result.status)
-      ? (await request(result.url, { maxBytes: 1 })).status
+      ? (await request(result.url, { publicOnly: true, maxBytes: 1, truncateOnLimit: true })).status
       : result.status
   },
   /**
@@ -339,18 +494,31 @@ window.funlink = {
       return ''
     }
     if (!['http:', 'https:'].includes(page.protocol)) return ''
+    try {
+      await resolvePublicTarget(page)
+    } catch {
+      return ''
+    }
     // 页面打不开也还有 /favicon.ico 可以试，所以读失败不算结束。
     let html = ''
     let base = page.href
     try {
-      const result = await request(page.href, { headers: ICON_HEADERS, timeout: ICON_TIMEOUT, allowedOrigin: page.origin, maxBytes: ICON_HTML_BYTES })
+      const result = await request(page.href, {
+        headers: ICON_HEADERS,
+        timeout: ICON_TIMEOUT,
+        allowTarget: target => isSameIconSite(page, target),
+        publicOnly: true,
+        maxBytes: ICON_HTML_BYTES,
+        truncateOnLimit: true,
+      })
       html = result.body
       // 相对地址要按重定向落地后的地址解析，否则 example.com -> www.example.com 这类会解错。
       base = result.url
     } catch { /* 继续走兜底候选 */ }
+    const baseUrl = new URL(base)
     for (const candidate of iconCandidates(html, base)) {
       try {
-        const dataUrl = await downloadIcon(candidate.url, new URL(base).origin)
+        const dataUrl = await downloadIcon(candidate.url, baseUrl)
         if (dataUrl) return dataUrl
       } catch { /* 这张拿不到就试下一张 */ }
     }

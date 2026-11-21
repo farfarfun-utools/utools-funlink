@@ -482,3 +482,18 @@ test('忽略链接后它不再参与扫描，并且写进了存储', async () =>
   assert.match(wrapper.find('.invalid-summary').text(), /共需检查 0 条链接/)
   assert.deepEqual(readStorage('funlink-ignore-list', []), [{ title: '不存在', url: 'https://missing.example.com' }])
 })
+
+test('点击扫描结果或抓图失败列表里的链接时拦截导航并走 openExternal', async () => {
+  const opened = []
+  window.funlink = {
+    checkUrl: async () => 404,
+    openExternal: (url, browser) => opened.push([url, browser]),
+  }
+  const bookmarks = [{ id: 'web_1', title: '失效站点', url: 'https://missing.example.com/' }]
+  const wrapper = await openSubDialog(mountDialog({ bookmarks }), '.invalid-links-entry')
+  await wrapper.find('.invalid-links-modal header .data-button').trigger('click')
+  await nextTick()
+
+  await wrapper.find('.invalid-result-list a').trigger('click')
+  assert.deepEqual(opened, [['https://missing.example.com/', '']])
+})

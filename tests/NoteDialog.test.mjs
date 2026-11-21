@@ -86,3 +86,20 @@ test('清空笔记保存成空串而不是占位的空段落', async () => {
   const [[, content]] = wrapper.emitted('save')
   assert.equal(content, '')
 })
+
+test('粘贴外部 HTML 时会先净化，丢弃 script 与事件处理器', async () => {
+  const wrapper = await openWith('')
+  const editor = wrapper.find('.note-editor')
+  await editor.trigger('paste', {
+    clipboardData: {
+      getData: type => (type === 'text/html'
+        ? '<p>粘贴正文</p><script>window.__evil=1</script><img src="https://evil.example/x.png" onerror="window.__evil=2">'
+        : '粘贴正文'),
+    },
+  })
+
+  assert.equal(editor.element.querySelectorAll('script').length, 0)
+  assert.equal(editor.element.querySelectorAll('[onerror]').length, 0)
+  assert.equal(editor.element.querySelectorAll('img').length, 0)
+  assert.match(editor.element.innerHTML, /粘贴正文/)
+})

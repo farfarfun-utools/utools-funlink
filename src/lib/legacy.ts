@@ -121,8 +121,9 @@ export function convertLegacyExport(raw: unknown): { state: AppState, dropped: n
     const own = rawCatIds.filter(id => categoryIds.has(id) || id === 'cat@default')
     const icon = doc.icon || {}
     // 原插件的 image 图标多数没有随附数据（图是去第三方 favicon 现取的），
-    // 这类一律转成文字图标，否则导入后满屏空白圆圈。
-    const hasImage = icon.type === 'image' && Boolean(icon.data)
+    // 且只认 data:image/ 内联图片数据（拒绝 file:/javascript:/外链地址），
+    // 其余一律转成文字图标，否则导入后满屏空白圆圈或触发非预期资源访问。
+    const hasImage = icon.type === 'image' && typeof icon.data === 'string' && /^data:image\//i.test(icon.data.trim())
     const title = String(doc.title).trim()
     return {
       id: doc._id || `web_${index}`,

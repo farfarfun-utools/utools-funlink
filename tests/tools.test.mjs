@@ -1,6 +1,6 @@
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { buildBookmark, describeBookmark, findBookmark, findByUrl, listCategories, resolveCategoryId, searchBookmarks } from '../src/lib/tools.ts'
+import { assertAiOpenableBookmark, buildBookmark, describeBookmark, findBookmark, findByUrl, listCategories, resolveCategoryId, searchBookmarks } from '../src/lib/tools.ts'
 
 function fakeState(bookmarks = [], categories = []) {
   return {
@@ -130,4 +130,23 @@ test('findBookmark 定位不到时报错，并提示下一步怎么做', () => {
   assert.throws(() => findBookmark(state, { id: 'w4' }), /没有找到 id/, '废纸篓里的卡片不该被打开')
   assert.throws(() => findBookmark(state, { keyword: '没有这个' }), /search_bookmarks/)
   assert.throws(() => findBookmark(state, {}), /id 或 keyword/)
+})
+
+test('AI 工具参数为 null/undefined 时安全处理，且仅允许 http/https 协议', () => {
+  const state = sample()
+
+  assert.equal(searchBookmarks(state, null).total, 3)
+  assert.equal(searchBookmarks(state, undefined).total, 3)
+  assert.throws(() => buildBookmark(state, null), /请输入网址/)
+  assert.throws(() => findBookmark(state, null), /id 或 keyword/)
+
+  assert.throws(() => buildBookmark(state, { url: 'file:///etc/passwd' }), /仅支持 http 和 https/)
+  assert.throws(() => buildBookmark(state, { url: 'ftp://files.example.com/' }), /仅支持 http 和 https/)
+
+  assert.doesNotThrow(() => assertAiOpenableBookmark({ id: 'a', title: '网页', url: 'https://example.com/' }))
+  assert.throws(() => assertAiOpenableBookmark({ id: 'b', title: '本地', url: 'file:///etc/passwd' }), /仅支持打开 http 和 https/)
+  assert.throws(
+    () => assertAiOpenableBookmark({ id: 'c', title: '混合', url: 'https://example.com/', urls: ['file:///etc/passwd'] }),
+    /仅支持打开 http 和 https/,
+  )
 })

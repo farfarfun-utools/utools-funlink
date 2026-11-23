@@ -37,5 +37,16 @@
     "vue-tsc": "^3.3.12"
   },
   "description": "一链即达 FunLink：收藏、分类、搜索并快速打开网址",
+  "keywords": [
+    "utools",
+    "utools-plugin",
+    "funlink",
+    "bookmarks",
+    "navigation",
+    "productivity",
+    "webdav",
+    "vue3",
+    "farfarfun"
+  ],
   "homepage": "https://farfarfun.github.io/packages/utools-funlink/"
 }

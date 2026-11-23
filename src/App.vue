@@ -87,12 +87,26 @@ function handleContextAction(action: string) {
   if (action === 'favorite') funlink.toggleFavorite(bookmark)
   if (action === 'quick') funlink.toggleQuick(bookmark)
   if (action === 'copy') {
-    if (window.utools?.copyText) window.utools.copyText(bookmark.url)
-    else navigator.clipboard?.writeText(bookmark.url)
+    void copyBookmarkUrl(bookmark.url)
   }
   if (action === 'trash') funlink.moveToTrash(bookmark)
   if (action === 'restore') funlink.restoreBookmark(bookmark)
   if (action === 'delete') funlink.deleteBookmark(bookmark)
+}
+
+async function copyBookmarkUrl(url: string) {
+  try {
+    if (window.utools?.copyText) {
+      if (window.utools.copyText(url) === false) throw new Error('copyText returned false')
+    } else if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(url)
+    } else {
+      throw new Error('clipboard unavailable')
+    }
+    funlink.showToast('链接已复制')
+  } catch {
+    funlink.showToast('复制链接失败，请检查剪贴板权限', true)
+  }
 }
 
 function handleDragStart(id: string, event: DragEvent) {
@@ -100,8 +114,15 @@ function handleDragStart(id: string, event: DragEvent) {
   if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
 }
 
+function handleDragEnd() {
+  draggedBookmarkId.value = null
+}
+
 function handleDrop(targetId: string) {
-  if (!draggedBookmarkId.value || draggedBookmarkId.value === targetId) return
+  if (!draggedBookmarkId.value || draggedBookmarkId.value === targetId) {
+    draggedBookmarkId.value = null
+    return
+  }
   funlink.reorderBookmarks(draggedBookmarkId.value, targetId)
   draggedBookmarkId.value = null
 }
@@ -169,6 +190,7 @@ onBeforeUnmount(() => {
           <BookmarkGrid
             :bookmarks="currentBookmarks"
             :view-key="gridViewKey"
+            :dragged-id="draggedBookmarkId || ''"
             :trash-view="state.currentView === 'trash'"
             :show-add="!['trash', 'quick', 'favorites'].includes(state.currentView)"
             @add="bookmarkDialog?.open()"
@@ -176,6 +198,7 @@ onBeforeUnmount(() => {
             @note="noteDialog?.open($event)"
             @context-menu="openContextMenu"
             @drag-start="handleDragStart"
+            @drag-end="handleDragEnd"
             @drop="handleDrop"
           />
         </div>

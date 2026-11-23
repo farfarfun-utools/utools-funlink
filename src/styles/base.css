@@ -8,5 +8,10 @@ button { padding: 0; border: 0; background: transparent; cursor: pointer; }
    漏掉的话键盘走到哪儿完全看不出来。 */
 button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible,
 [role='button']:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.main, .settings-body, .webdav-file-list, .note-editor, .invalid-result-list, .icon-fetch-list { scrollbar-width: thin; scrollbar-color: var(--control-border) transparent; }
+.main::-webkit-scrollbar, .settings-body::-webkit-scrollbar, .webdav-file-list::-webkit-scrollbar, .note-editor::-webkit-scrollbar, .invalid-result-list::-webkit-scrollbar, .icon-fetch-list::-webkit-scrollbar { width: 6px; height: 6px; }
+.main::-webkit-scrollbar-track, .settings-body::-webkit-scrollbar-track, .webdav-file-list::-webkit-scrollbar-track, .note-editor::-webkit-scrollbar-track, .invalid-result-list::-webkit-scrollbar-track, .icon-fetch-list::-webkit-scrollbar-track { background: transparent; }
+.main::-webkit-scrollbar-thumb, .settings-body::-webkit-scrollbar-thumb, .webdav-file-list::-webkit-scrollbar-thumb, .note-editor::-webkit-scrollbar-thumb, .invalid-result-list::-webkit-scrollbar-thumb, .icon-fetch-list::-webkit-scrollbar-thumb { border-radius: 999px; background: var(--control-border); }
+.main::-webkit-scrollbar-thumb:hover, .settings-body::-webkit-scrollbar-thumb:hover, .webdav-file-list::-webkit-scrollbar-thumb:hover, .note-editor::-webkit-scrollbar-thumb:hover, .invalid-result-list::-webkit-scrollbar-thumb:hover, .icon-fetch-list::-webkit-scrollbar-thumb:hover { background: var(--placeholder); }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, nextTick, reactive, ref } from 'vue'
 import { childrenOf as childrenIn, rootCategories } from '../lib/views'
 import type { Category, CategoryAction } from '../lib/types'
 
@@ -24,6 +24,7 @@ const emit = defineEmits<{
   action: [id: string, action: CategoryAction]
 }>()
 const dialog = ref<HTMLDialogElement | null>(null)
+const popoverInput = ref<HTMLInputElement | null>(null)
 const rootName = ref('')
 const popoverName = ref('')
 const expandedIds = ref<string[]>([])
@@ -89,13 +90,19 @@ function togglePopover(id: string, type: string, event: MouseEvent) {
   const modal = dialog.value?.getBoundingClientRect()
   if (!trigger || !modal) return
   const anchor = trigger.getBoundingClientRect()
+  const halfWidth = type === 'delete' ? 150 : type === 'position' ? 108 : 130
+  const rawLeft = anchor.left - modal.left + anchor.width / 2
+  const clampedLeft = modal.width > halfWidth * 2 + 16
+    ? Math.max(halfWidth + 8, Math.min(rawLeft, modal.width - halfWidth - 8))
+    : rawLeft
   Object.assign(popover, {
     id,
     type,
-    left: anchor.left - modal.left + anchor.width / 2,
+    left: clampedLeft,
     top: anchor.bottom - modal.top + 10,
   })
   popoverName.value = ''
+  if (type === 'add') nextTick(() => popoverInput.value?.focus())
 }
 
 function addNear(category: Category) {
@@ -300,7 +307,7 @@ defineExpose({ open, close })
           @click.stop
         >
           <span>{{ activeCategory.parentId ? '追加分类' : '添加子分类' }}</span>
-          <input v-model="popoverName" maxlength="12" aria-label="分类名称" placeholder="输入分类名，回车提交！" />
+          <input ref="popoverInput" v-model="popoverName" maxlength="12" aria-label="分类名称" placeholder="输入分类名，回车提交！" />
         </form>
         <div
           v-if="popover.type === 'delete'"
@@ -308,7 +315,7 @@ defineExpose({ open, close })
           :style="{ left: `${popover.left}px`, top: `${popover.top}px` }"
           @click.stop
         >
-          <p>{{ activeCategory.parentId ? '删除分类后，分类中的卡片会移到废纸篓。' : '删除分类后，其子分类将一并删除，分类中的卡片会移到废纸篓。' }}</p>
+          <p>{{ activeCategory.parentId ? '删除分类后，分类中的卡片会移到收集箱。' : '删除分类后，其子分类将一并删除，分类中的卡片会移到收集箱。' }}</p>
           <div><button type="button" @click="closePopover">算了</button><button class="confirm-delete" type="button" @click="confirmDelete(activeCategory)">删吧</button></div>
         </div>
       </template>

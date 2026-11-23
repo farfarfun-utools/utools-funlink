@@ -37,6 +37,7 @@
 .switch-control::after { content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: transform .2s; }
 .switch-line input:checked + .switch-control { background: var(--primary); }
 .switch-line input:checked + .switch-control::after { transform: translateX(20px); }
+.switch-line input:focus-visible + .switch-control { outline: 2px solid var(--primary); outline-offset: 2px; }
 .browser-setting { margin-top: 24px; }
 .browser-size-row { height: 30px; display: flex; align-items: center; gap: 8px; margin-top: 20px; font-size: 14px; }
 .browser-size-row .number-stepper:first-of-type { width: 121px; margin-right: 3px; }
@@ -53,6 +54,7 @@
 .check input { position: absolute; opacity: 0; }
 .check > span { position: relative; width: 14px; height: 14px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); pointer-events: none; }
 .check input:checked + span { border-color: var(--primary); background: var(--primary); }
+.check input:focus-visible + span { outline: 2px solid var(--primary); outline-offset: 2px; }
 .check input:checked + span::after { content: ''; position: absolute; top: 1px; left: 4px; width: 3px; height: 7px; border: solid #fff; border-width: 0 1px 1px 0; transform: rotate(45deg); }
 .check.disabled { color: var(--placeholder); cursor: not-allowed; }
 .check.disabled input:checked + span { border-color: var(--disabled-check-border); background: var(--disabled-check-bg); }
@@ -65,11 +67,13 @@
 .data-label { display: flex; align-items: center; justify-content: space-between; }
 .text-button { min-width: 118px; min-height: 30px; margin-right: 12px; padding: 4px 10px; border: 1px solid var(--border); border-radius: 10px; font-size: 14px; }
 .button-pair { display: flex; width: 100%; gap: 12px; }
-.data-button { min-height: 32px; padding: 5px 14px; border-radius: 10px; color: #fff; font-size: 14px; }
+.data-button { min-height: 32px; padding: 5px 14px; border-radius: 10px; color: #fff; font-size: 14px; transition: filter .15s ease; }
+.data-button:hover:not(:disabled) { filter: brightness(1.06); }
+.data-button:disabled { cursor: not-allowed; opacity: .55; }
 .button-pair .data-button { width: 50%; }
-.data-button.warning { background: #ffba08; }
-.data-button.success { background: #00c1a2; }
-.data-button.primary { background: var(--primary); }
+.data-button.warning { background: #c97d00; }
+.data-button.success { background: #009c84; }
+.data-button.primary { background: #1796aa; }
 .data-button.danger { background: var(--danger); }
 .bookmark-import-select, .input-group { width: 100%; height: 32px; margin-bottom: 12px; border: 1px solid var(--control-border); border-radius: 10px; background: var(--control-bg); font-size: 14px; }
 .bookmark-import-select { position: relative; }
@@ -80,8 +84,9 @@
 .input-group span { display: flex; align-items: center; padding: 0 20px; border-right: 1px solid var(--control-border); background: var(--fill-light); white-space: nowrap; }
 .input-group input { min-width: 0; flex: 1; padding: 0 10px; border: 0; background: var(--control-bg); }
 .bookmark-import .import-help { margin: -5px 0 10px; color: var(--muted); font-size: 12px; line-height: 18px; }
-.import-notes { margin-top: 13px; color: var(--muted); font-size: 14px; line-height: 32px; }
+.import-notes { margin-top: 12px; color: var(--muted); font-size: 12px; line-height: 20px; }
 .bookmark-import .import-notes p { margin: 0; color: inherit; font-size: inherit; }
+.bookmark-import .import-notes p + p { margin-top: 3px; }
 .import-notes span { color: var(--danger); }
 .sub-modal { width: min(500px, calc(100vw - 32px)); margin: 15vh auto 0; padding: 0; border: 0; border-radius: 16px; background: var(--surface); color: var(--text); }
 .sub-modal form { position: relative; padding: 23px 26px 26px; }

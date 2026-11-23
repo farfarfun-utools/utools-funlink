@@ -3,8 +3,8 @@ import { displayHost, initials, safeColor } from '../lib/core'
 import { useBookmarkIcon } from '../composables/useBookmarkIcon'
 import type { Bookmark } from '../lib/types'
 
-const props = withDefaults(defineProps<{ bookmark: Bookmark, trashView?: boolean }>(), { trashView: false })
-const emit = defineEmits(['open', 'note', 'context-menu', 'drag-start', 'drop'])
+const props = withDefaults(defineProps<{ bookmark: Bookmark, trashView?: boolean, dragging?: boolean }>(), { trashView: false, dragging: false })
+const emit = defineEmits(['open', 'note', 'context-menu', 'drag-start', 'drag-end', 'drop'])
 // 只渲染存在本地的图（用户上传或添加时抓来的，存在数据库附件里，老数据还内联在卡片上），
 // 渲染时不发任何请求，更不经过第三方 favicon 服务。
 // icon.pending 是「有图但附件还没读出来」：这期间留个空圆圈，不显示首字母——
@@ -15,10 +15,12 @@ const icon = useBookmarkIcon(() => props.bookmark)
 <template>
   <article
     class="bookmark-card"
+    :class="{ dragging }"
     :draggable="!trashView"
     @click="emit('open', bookmark)"
     @contextmenu.prevent="emit('context-menu', bookmark, $event)"
     @dragstart="emit('drag-start', bookmark.id, $event)"
+    @dragend="emit('drag-end')"
     @dragover.prevent
     @drop.prevent="emit('drop', bookmark.id)"
   >

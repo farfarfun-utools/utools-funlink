@@ -56,6 +56,7 @@ const form = reactive<BookmarkForm>(blankForm())
 let iconTouched = false
 let handledUrl = ''
 let iconTimer: ReturnType<typeof setTimeout> | null = null
+let fetchToken = 0
 const roots = computed(() => rootCategories(props.categories))
 const childrenOf = (id: string) => childrenIn(props.categories, id)
 // 「收集箱」不是真实分类，但在选择器里要能被勾上，所以拼成一个同形状的伪分类。
@@ -126,6 +127,7 @@ function close() {
 }
 
 function stopIconFetch() {
+  fetchToken += 1
   if (iconTimer) clearTimeout(iconTimer)
   iconTimer = null
   fetchingIcon.value = false
@@ -136,6 +138,7 @@ function stopIconFetch() {
  * @param force 用户自己点的「抓取图标」，哪怕已经定过图标也照换
  */
 async function fetchIcon(url: string, { force = false } = {}) {
+  const token = (fetchToken += 1)
   handledUrl = url
   fetchingIcon.value = true
   // 搜索类网址带着 {q} 占位符，原样请求是个无意义的地址；
@@ -143,7 +146,7 @@ async function fetchIcon(url: string, { force = false } = {}) {
   const icon = await fetchSiteIcon(stripQueryPlaceholder(url))
   // 抓的这几秒里用户可能又改了网址，或者把弹窗关掉开了另一张卡片，
   // 那这张图就不是当前这条网址的图标了，丢掉。
-  if (form.url.trim() !== url) return
+  if (token !== fetchToken || !dialog.value?.open || form.url.trim() !== url) return
   fetchingIcon.value = false
   if (!icon || (iconTouched && !force)) return
   form.iconData = icon
@@ -180,6 +183,8 @@ function scheduleIconFetch() {
 }
 
 function addUrl() { form.urls.push('') }
+
+function removeUrl(index: number) { form.urls.splice(index, 1) }
 
 function pickIcon() {
   iconInput.value?.click()
@@ -335,7 +340,10 @@ defineExpose({ open, close })
 
       <div class="bookmark-dialog-body">
         <input ref="urlInput" v-model="form.url" class="bookmark-url-input" inputmode="url" placeholder="请输入网站地址" required />
-        <input v-for="(_, index) in form.urls" :key="index" v-model="form.urls[index]" class="bookmark-url-input extra-url" inputmode="url" :placeholder="`请输入附加网址 ${index + 1}`" />
+        <div v-for="(_, index) in form.urls" :key="index" class="extra-url-row">
+          <input v-model="form.urls[index]" class="bookmark-url-input extra-url" inputmode="url" :placeholder="`请输入附加网址 ${index + 1}`" />
+          <button type="button" class="extra-url-remove" :aria-label="`移除附加网址 ${index + 1}`" title="移除" @click="removeUrl(index)">×</button>
+        </div>
 
         <div class="web-edit-card" :class="{ skeleton: !expanded }">
           <template v-if="expanded">

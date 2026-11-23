@@ -102,7 +102,7 @@ defineExpose({ open, close })
         <div class="note-footer-content">
           <!-- 功能还没做，点了没反应。标成 disabled，别让它看起来还能点。 -->
           <button type="button" disabled title="暂未开放"><i class="iconfont icon-help" aria-hidden="true" /> 帮助</button>
-          <span class="note-shortcuts"><i /><kbd>/</kbd> 菜单命令 <i /><kbd>esc</kbd> 或 <kbd>ctrl</kbd> + <kbd>s</kbd> 保存</span>
+          <span class="note-shortcuts"><kbd>esc</kbd> 或 <kbd>ctrl</kbd> + <kbd>s</kbd> 保存</span>
         </div>
       </footer>
     </template>

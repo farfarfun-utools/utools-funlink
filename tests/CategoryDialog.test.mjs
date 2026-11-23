@@ -87,10 +87,23 @@ test('二级 Tabs 位置选项带上分类 id 发出 position', async () => {
 test('删除确认后发出 delete 并关掉气泡', async () => {
   const wrapper = await openDialog()
   await wrapper.findAll('.category-action.danger')[0].trigger('click')
+  assert.match(wrapper.find('.delete-popover p').text(), /收集箱/)
+  assert.doesNotMatch(wrapper.find('.delete-popover p').text(), /废纸篓/)
   await wrapper.find('.confirm-delete').trigger('click')
 
   assert.deepEqual(wrapper.emitted('action'), [['cat_1', { type: 'delete', confirmed: true }]])
   assert.equal(wrapper.find('.delete-popover').exists(), false)
+})
+
+test('打开添加子分类气泡后自动聚焦输入框', async () => {
+  const wrapper = await openDialog()
+  await wrapper.findAll('.category-action.primary')[0].trigger('click')
+  await nextTick()
+
+  const input = wrapper.find('.add-popover input')
+  assert.ok(input.exists())
+  assert.equal(document.activeElement, input.element)
+  wrapper.unmount()
 })
 
 test('带卡片的一级分类不能被拖进别的分类', async () => {

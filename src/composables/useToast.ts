@@ -1,4 +1,4 @@
-import { reactive } from 'vue'
+import { getCurrentInstance, onBeforeUnmount, reactive } from 'vue'
 
 // 提示停留时长。够看完一句话，又不至于盖着界面不走。
 const DURATION = 3200
@@ -14,6 +14,8 @@ export function useToast() {
     Object.assign(toast, { visible: true, message, error })
     timer = setTimeout(() => { toast.visible = false }, DURATION)
   }
+
+  if (getCurrentInstance()) onBeforeUnmount(() => clearTimeout(timer))
 
   return { toast, showToast }
 }

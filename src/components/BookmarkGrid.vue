@@ -5,12 +5,13 @@ import type { Bookmark } from '../lib/types'
 
 const props = defineProps<{
   bookmarks: Bookmark[]
+  draggedId?: string
   trashView?: boolean
   showAdd?: boolean
   /** 这批卡片属于哪个视图（视图 + 搜索词）。换了就退回第一批重新铺。 */
   viewKey?: string
 }>()
-const emit = defineEmits(['add', 'open', 'note', 'context-menu', 'drag-start', 'drop'])
+const emit = defineEmits(['add', 'open', 'note', 'context-menu', 'drag-start', 'drag-end', 'drop'])
 
 // 「全部」视图和搜索结果给的都是整库。两千张卡片一次性挂完实测要 130ms 以上，
 // 这一整帧里点击和滚动都没有响应。改成先挂够铺满首屏的一批，剩下的按帧补上：
@@ -50,11 +51,13 @@ onUnmounted(() => { if (frame) cancelAnimationFrame(frame) })
         v-for="bookmark in shownBookmarks"
         :key="bookmark.id"
         :bookmark="bookmark"
+        :dragging="bookmark.id === draggedId"
         :trash-view="trashView"
         @open="emit('open', $event)"
         @note="emit('note', $event)"
         @context-menu="(bookmark, event) => emit('context-menu', bookmark, event)"
         @drag-start="(id, event) => emit('drag-start', id, event)"
+        @drag-end="emit('drag-end')"
         @drop="emit('drop', $event)"
       />
       <button v-if="showAdd" class="add-item" type="button" aria-label="添加网址" @click="emit('add')">

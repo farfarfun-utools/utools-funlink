@@ -146,25 +146,33 @@ export function useWebdav({ onMessage, backupContent, onRestore }: WebdavDeps) {
 
   /** 下载某份备份并交回调用方还原，返回是否成功。 */
   async function restore(file: WebDavFile) {
+    if (loading.value) return false
     const found = bridge()
     if (!found) return false
+    loading.value = true
     try {
       return onRestore(await found.webdavRestore(plain(), file.href))
     } catch (error) {
       onMessage(`还原失败：${reason(error)}`, true)
       return false
+    } finally {
+      loading.value = false
     }
   }
 
   async function remove(file: WebDavFile) {
+    if (loading.value) return
     const found = bridge()
     if (!found) return
+    loading.value = true
     try {
       await found.webdavDelete(plain(), file.href)
       files.value = files.value.filter(item => item.href !== file.href)
       onMessage('删除成功！')
     } catch (error) {
       onMessage(`删除失败：${reason(error)}`, true)
+    } finally {
+      loading.value = false
     }
   }
 

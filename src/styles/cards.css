@@ -29,6 +29,7 @@
   box-shadow: var(--card-hover-shadow);
 }
 .bookmark-card:active { transform: translateY(0); }
+.bookmark-card.dragging { opacity: .55; border-style: dashed; border-color: var(--primary); }
 .bookmark-card:hover .bookmark-copy h2 { color: var(--text-strong); }
 .bookmark-icon {
   position: relative;

@@ -15,11 +15,32 @@ watch(() => [props.x, props.y, props.items], async () => {
     left: `${Math.max(8, Math.min(props.x, window.innerWidth - width - 8))}px`,
     top: `${Math.max(8, Math.min(props.y, window.innerHeight - height - 8))}px`,
   }
+  const first = menu.value?.querySelector<HTMLButtonElement>('button[role="menuitem"]')
+  first?.focus()
 }, { immediate: true })
+
+function handleMenuKeydown(event: KeyboardEvent) {
+  const buttons = [...(menu.value?.querySelectorAll<HTMLButtonElement>('button[role="menuitem"]') || [])]
+  if (!buttons.length) return
+  const index = buttons.indexOf(document.activeElement as HTMLButtonElement)
+  if (event.key === 'ArrowDown') {
+    event.preventDefault()
+    buttons[(index + 1) % buttons.length]?.focus()
+  } else if (event.key === 'ArrowUp') {
+    event.preventDefault()
+    buttons[(index - 1 + buttons.length) % buttons.length]?.focus()
+  } else if (event.key === 'Home') {
+    event.preventDefault()
+    buttons[0]?.focus()
+  } else if (event.key === 'End') {
+    event.preventDefault()
+    buttons[buttons.length - 1]?.focus()
+  }
+}
 </script>
 
 <template>
-  <div ref="menu" class="context-menu" role="menu" :style="position" @click.stop>
+  <div ref="menu" class="context-menu" role="menu" :style="position" @click.stop @keydown="handleMenuKeydown">
     <template v-for="item in items" :key="item.action">
       <button type="button" role="menuitem" @click="emit('select', item.action)">
         <i v-if="item.icon" class="iconfont menu-icon" :class="item.icon" aria-hidden="true" />

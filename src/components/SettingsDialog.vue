@@ -259,7 +259,9 @@ defineExpose({ open, close })
           <p class="import-help">将按这些符号自动分割名称与简介。多个请用英文逗号分隔</p>
           <div class="button-pair"><button type="button" class="data-button primary" @click="choose('import', 'append')">追加导入</button><button type="button" class="data-button primary" @click="choose('import', 'replace')">替换导入</button></div>
           <div class="import-notes">
-            1、支持chrome、edge浏览器导出的html格式数据 2、导入之前请先<span>备份</span>数据，以防数据丢失！！！ 3、导入成功后需<span>“完全退出插件”</span>再打开才能生效
+            <p>1. 支持 Chrome、Edge 浏览器导出的 HTML 书签文件。</p>
+            <p>2. 导入之前请先<span>备份</span>数据，以防数据丢失。</p>
+            <p>3. 导入成功后需<span>完全退出插件</span>再重新打开。</p>
           </div>
         </section>
         <section class="data-field">
@@ -290,7 +292,7 @@ defineExpose({ open, close })
   <dialog ref="webdavListDialog" class="sub-modal webdav-list-modal">
     <header><h2>已备份文件</h2><button type="button" aria-label="关闭" @click="webdavListDialog?.close()">×</button></header>
     <div v-if="webdavFiles.length" class="webdav-file-list">
-      <div v-for="file in webdavFiles" :key="file.href"><span>{{ file.name }}</span><small>{{ (file.size / 1024).toFixed(2) }}kb</small><button type="button" @click="restoreWebdav(file)">还原</button><button type="button" class="danger-text" @click="deleteWebdav(file)">删除</button></div>
+      <div v-for="file in webdavFiles" :key="file.href"><span>{{ file.name }}</span><small>{{ (file.size / 1024).toFixed(2) }}kb</small><button type="button" :disabled="webdavLoading" @click="restoreWebdav(file)">还原</button><button type="button" class="danger-text" :disabled="webdavLoading" @click="deleteWebdav(file)">删除</button></div>
     </div>
     <div v-else class="webdav-empty">暂无数据</div>
   </dialog>

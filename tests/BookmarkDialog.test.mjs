@@ -41,6 +41,9 @@ test('旧备份里 { value } 形式的附加网址会拍平成字符串', async 
 
   const extras = wrapper.findAll('.extra-url').map(input => input.element.value)
   assert.deepEqual(extras, ['https://a.example.com', 'https://b.example.com'])
+
+  await wrapper.find('.extra-url-remove').trigger('click')
+  assert.deepEqual(wrapper.findAll('.extra-url').map(input => input.element.value), ['https://b.example.com'])
 })
 
 test('保存时网址会补全协议、标题去掉首尾空格', async () => {
